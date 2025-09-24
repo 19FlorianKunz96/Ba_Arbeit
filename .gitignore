@@ -5,14 +5,21 @@ install/
 log/
 
 # Python
-*.pyc
-*.pyo
-*.pyd
 __pycache__/
+*.py[cod]
+*$py.class
 
-# Swap files
-*.swp
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
 
-# Temporary files
-*.tmp
+# IDE/editor
+*.idea
+*.vscode
+
+# Logs
+*.log
 
