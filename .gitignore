@@ -1,0 +1,18 @@
+# ROS build folders
+build/
+devel/
+install/
+log/
+
+# Python
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+
+# Swap files
+*.swp
+
+# Temporary files
+*.tmp
+
