@@ -17,7 +17,7 @@ class RosGazeboEnv(gym.Env):
         super(RosGazeboEnv, self).__init__()
 
         # --- Action Space ---
-        # 0: vorwärts
+        # 0 
         # 1: zurück
         # 2: links drehen
         # 3: rechts drehen
