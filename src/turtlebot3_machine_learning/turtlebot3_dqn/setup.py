@@ -38,6 +38,9 @@ setup(
             'dqn_gazebo = turtlebot3_dqn.dqn_gazebo:main',
             'dqn_test = turtlebot3_dqn.dqn_test:main',
             'result_graph = turtlebot3_dqn.result_graph:main',
+            'lidar_subscriber = turtlebot3_dqn.Lidar_Subscriber:main',
+            'odom_subscriber = turtlebot3_dqn.Odom_Subscriber:main',
+
         ],
     },
 )
