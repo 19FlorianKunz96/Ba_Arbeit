@@ -69,15 +69,19 @@ class DQNMetric(tensorflow.keras.metrics.Metric):
 
 class DQNAgent(Node):
 
-    def __init__(self, stage_num, max_training_episodes, stage_boost = False):       #added param stage_boost for taking weights from last stages
+    def __init__(self):       #added param stage_boost for taking weights from last stages
         super().__init__('dqn_agent')
 
-        self.stage = int(stage_num)
+        self.declare_parameter('stagex',1)
+        self.declare_parameter('max_episodes',100)
+        self.declare_parameter('stage_boost',False)
+        self.stage = self.get_parameter('stagex').get_parameter_value().integer_value
         self.train_mode = True
         self.state_size = 26
         self.action_size = 5
-        self.max_training_episodes = int(max_training_episodes)
+        self.max_training_episodes = self.get_parameter('max_episodes').get_parameter_value().integer_value
 
+        self.stage_boost = self.get_parameter('stage_boost').get_parameter_value().bool_value
         self.done = False
         self.succeed = False
         self.fail = False
@@ -99,15 +103,18 @@ class DQNAgent(Node):
         self.update_target_after = 5000
         self.target_update_after_counter = 0
 
+        #set this to True and adjust the load_episode to continue training on the same stage
+        #be careful: higher stages already will have used the weights of lower parameters
         self.load_model = False
         self.load_episode = 0
+
         self.model_dir_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.realpath(__file__))),
             'saved_model'
         )
 
         self.model_path = os.path.join(
-            
+
             self.model_dir_path,
             'stage' + str(self.stage) + '_episode' + str(self.load_episode) + '.h5'
         )
@@ -122,19 +129,25 @@ class DQNAgent(Node):
                 self.epsilon = param.get('epsilon')
                 self.step_counter = param.get('step_counter')
 
-        if stage_boost == True:
+        #Training the stage with the youngest weights
+        #stage_boost has to be set in the terminal
+        if self.stage_boost == True:
             files = os.listdir(self.model_dir_path)
-            stage_files = [f for f in files if f.startswith('stage') and f.endswith('.h5')]
-            stage_files.sort()                                                  # has to be adjusted if more than 10 stages
-                                                                                # test commit
+            stage_files = [f for f in files if f.startswith('stage') and f.endswith('.h5')]#TODO not correct
+            stage_files.sort()     
+
             if stage_files:
                 self.last_model_path = os.path.join(self.model_dir_path, stage_files[-1])
                 self.model.set_weights(load_model(self.last_model_path).get_weights())
+                matched = self.model.get_weights()
                 self.epsilon = 0.2
+                self.get_logger().info(f'Epsilon angepasst auf {self.epsilon}')
+                self.update_target_model()
             else:
                 self.get_logger().warn('No training data in previous stages, try again ...')
 
-
+        self.epsilon_start = self.epsilon
+        
         if LOGGING:
             tensorboard_file_name = current_time + ' dqn_stage' + str(self.stage) + '_reward'
             home_dir = os.path.expanduser('~')
@@ -160,6 +173,8 @@ class DQNAgent(Node):
         episode_num = self.load_episode
 
         for episode in range(self.load_episode + 1, self.max_training_episodes + 1):
+            if episode ==1:
+                self.get_logger().info(f'Training with Stage Boost = {self.stage_boost}')
             state = self.reset_environment()
             episode_num += 1
             local_step = 0
@@ -260,8 +275,12 @@ class DQNAgent(Node):
     def get_action(self, state):
         if self.train_mode:
             self.step_counter += 1
-            self.epsilon = self.epsilon_min + (1.0 - self.epsilon_min) * math.exp(
-                -1.0 * self.step_counter / self.epsilon_decay)
+            #adjusted for different epsilon values(1.0-->self.epsilon)
+            # self.epsilon = self.epsilon_min + (self.epsilon - self.epsilon_min) * math.exp(
+            #     -self.epsilon * self.step_counter / self.epsilon_decay)         
+            # 
+            # --complete new--
+            self.epsilon = self.epsilon_min + (self.epsilon_start - self.epsilon_min) * math.exp(-self.step_counter / self.epsilon_decay)              
             lucky = random.random()
             if lucky > (1 - self.epsilon):
                 result = random.randint(0, self.action_size - 1)
@@ -359,15 +378,15 @@ class DQNAgent(Node):
             self.update_target_model()
 
 
-def main(args=None):
-    if args is None:
-        args = sys.argv
-    stage_num = args[1] if len(args) > 1 else '1'
-    max_training_episodes = args[2] if len(args) > 2 else '1000'
-    stage_boost = args[3] if len(args) > 3 else False
-    rclpy.init(args=args)
+def main():
+    # if args is None:
+    #     args = sys.argv
+    # stage_num = int(args[1]) if len(args) > 1 else '1'
+    # max_training_episodes = int(args[2]) if len(args) > 2 else '1000'
+    # stage_boost = args[3]=='True' if len(args) > 3 else False
+    rclpy.init()
 
-    dqn_agent = DQNAgent(stage_num, max_training_episodes, stage_boost = stage_boost)
+    dqn_agent = DQNAgent()
     rclpy.spin(dqn_agent)
 
     dqn_agent.destroy_node()

@@ -41,9 +41,10 @@ if ROS_DISTRO == 'humble':
 
 class GazeboInterface(Node):
 
-    def __init__(self, stage_num):
+    def __init__(self):
         super().__init__('gazebo_interface')
-        self.stage = int(stage_num)
+        self.declare_parameter('stagex',1)
+        self.stage = self.get_parameter('stagex').get_parameter_value().integer_value
 
         self.entity_name = 'goal_box'
         self.entity_pose_x = 0.5
@@ -262,10 +263,11 @@ class GazeboInterface(Node):
             self.entity_pose_y = goal_pose_list[rand_index][1]
 
 
-def main(args=None):
-    rclpy.init(args=sys.argv)
-    stage_num = sys.argv[1] if len(sys.argv) > 1 else '1'
-    gazebo_interface = GazeboInterface(stage_num)
+def main():
+    # rclpy.init(args=sys.argv)
+    rclpy.init()
+    # stage_num = int(sys.argv[1]) if len(sys.argv) > 1 else '1'
+    gazebo_interface = GazeboInterface()
     try:
         while rclpy.ok():
             rclpy.spin_once(gazebo_interface, timeout_sec=0.1)
