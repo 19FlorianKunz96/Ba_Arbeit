@@ -25,6 +25,9 @@ import os
 import random
 import sys
 import time
+import uuid
+import json
+import glob
 
 import numpy
 import rclpy
@@ -71,10 +74,13 @@ class DQNAgent(Node):
 
     def __init__(self):       #added param stage_boost for taking weights from last stages
         super().__init__('dqn_agent')
-
+        #evtl im parentlaunch die default werte weglassen, dass nicht ein string in integer umgewandelt werden muss ?
         self.declare_parameter('stagex',1)
         self.declare_parameter('max_episodes',100)
         self.declare_parameter('stage_boost',False)
+        self.declare_parameter('load_from_folder','actual')
+        self.declare_parameter('load_from_stage',1)
+        self.declare_parameter('load_from_episode',50)
         self.stage = self.get_parameter('stagex').get_parameter_value().integer_value
         self.train_mode = True
         self.state_size = 26
@@ -82,6 +88,9 @@ class DQNAgent(Node):
         self.max_training_episodes = self.get_parameter('max_episodes').get_parameter_value().integer_value
 
         self.stage_boost = self.get_parameter('stage_boost').get_parameter_value().bool_value
+        self.load_from_folder = self.get_parameter('load_from_folder').get_parameter_value().string_value
+        self.load_from_stage = self.get_parameter('load_from_stage').get_parameter_value().integer_value
+        self.load_from_episode = self.get_parameter('load_from_episode').get_parameter_value().integer_value
         self.done = False
         self.succeed = False
         self.fail = False
@@ -96,6 +105,13 @@ class DQNAgent(Node):
 
         self.replay_memory = collections.deque(maxlen=500000)
         self.min_replay_memory_size = 5000
+
+        self.uuid = uuid.uuid4()
+        self.date = datetime.date.today()
+        self.training_dir = f'{self.uuid}_{self.date}_stage{self.stage}'
+        #give the other nodes the dir
+        with open(os.path.join(os.path.dirname(os.path.realpath(__file__)),'temp.json'),'w') as temp:
+            json.dump({'folder': self.training_dir},temp)
 
         self.model = self.create_qnetwork()
         self.target_model = self.create_qnetwork()
@@ -112,6 +128,12 @@ class DQNAgent(Node):
             os.path.dirname(os.path.dirname(os.path.realpath(__file__))),
             'saved_model'
         )
+        self.training_dir_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.realpath(__file__))),
+            'trainings_done'
+        )
+
+        self.training_path_comp = os.path.join(self.training_dir_path,self.training_dir)
 
         self.model_path = os.path.join(
 
@@ -132,21 +154,56 @@ class DQNAgent(Node):
         #Training the stage with the youngest weights
         #stage_boost has to be set in the terminal
         if self.stage_boost == True:
-            files = os.listdir(self.model_dir_path)
-            stage_files = [f for f in files if f.startswith('stage') and f.endswith('.h5')]#TODO not correct
-            stage_files.sort()     
+            if self.load_from_folder == 'actual':
+                files = os.listdir(self.model_dir_path)
+                stage_files = [f for f in files if f.startswith('stage') and f.endswith('.h5')]#TODO doesnt sort correctly because of the numbers
+                stage_files.sort()     
 
-            if stage_files:
-                self.last_model_path = os.path.join(self.model_dir_path, stage_files[-1])
-                self.model.set_weights(load_model(self.last_model_path).get_weights())
-                matched = self.model.get_weights()
-                self.epsilon = 0.2
-                self.get_logger().info(f'Epsilon angepasst auf {self.epsilon}')
-                self.update_target_model()
+                if stage_files:
+                    self.last_model_path = os.path.join(self.model_dir_path, stage_files[-1])
+                    self.model.set_weights(load_model(self.last_model_path).get_weights())
+                    self.epsilon = 0.2
+                    # self.get_logger().info(f'Epsilon angepasst auf {self.epsilon}')
+                    self.update_target_model() #????
+                    self.info = 'last actual pre-trained model loaded'
+                    self.get_logger().info('last actual pre-trained model loaded')
+                else:
+                    self.get_logger().warn('No training data in previous stages')
+                    self.info='No training data in previous stages'
             else:
-                self.get_logger().warn('No training data in previous stages, try again ...')
+                self.file_root = os.path.join(self.training_dir_path,
+                                               os.path.join(self.load_from_folder,
+                                                f'stage{self.load_from_stage:05d}_episode{self.load_from_episode:05d}.h5'))
+                if os.path.exists(self.file_root) == True:
+                    self.model.set_weights(load_model(self.file_root).get_weights())
+                    self.epsilon = 0.2
+                    self.info = 'Weights successfully loaded'
+                    self.get_logger().info('Weights successfully loaded')
+                else:
+                    self.info = 'File doesnt exist. No weights loaded'
+                    self.get_logger().warn('File doesnt exist. No weights loaded')
+
 
         self.epsilon_start = self.epsilon
+        self.hyperparams = {
+            'Stage' : self.stage,
+            'Folder Name' : self.training_dir,
+            'Learned from older Stages' : self.stage_boost,
+            'Learned from Model' : {'Folder' : self.load_from_folder,'Stage':self.load_from_stage, 'Episode': self.load_from_episode},
+            'State Size' : self.state_size,
+            'Action Szie' : self.action_size,
+            'Maximum Episodes' : self.max_training_episodes,
+            'Discount Factor' : self.discount_factor,
+            'Learning Rate' : self.learning_rate,
+            'Starting with Epsilon' : self.epsilon_start,
+            'Starting Step Counter' : self.step_counter,
+            'Epsilon Decay' : self.epsilon_decay,
+            'Minimum Epsilon' : self.epsilon_min,
+            'Batch Size' : self.batch_size,
+            'Replay Memory Max' : self.replay_memory.maxlen,
+            'Replay Memory Min' : self.min_replay_memory_size,
+
+        }
         
         if LOGGING:
             tensorboard_file_name = current_time + ' dqn_stage' + str(self.stage) + '_reward'
@@ -173,8 +230,8 @@ class DQNAgent(Node):
         episode_num = self.load_episode
 
         for episode in range(self.load_episode + 1, self.max_training_episodes + 1):
-            if episode ==1:
-                self.get_logger().info(f'Training with Stage Boost = {self.stage_boost}')
+            # if episode ==1:
+            #     self.get_logger().info(f'Training with Stage Boost = {self.stage_boost}')
             state = self.reset_environment()
             episode_num += 1
             local_step = 0
@@ -232,19 +289,30 @@ class DQNAgent(Node):
                 time.sleep(0.01)
 
             if self.train_mode:
-                if episode % 100 == 0:
+                #default value : every 100 episodes
+                if os.path.exists(self.training_path_comp) == False:
+                        os.mkdir(self.training_path_comp)
+                        with open(os.path.join(self.training_path_comp,'config.json'),'w') as f:
+                            json.dump(self.hyperparams,f)
+
+
+                if episode % 50 == 0:
                     self.model_path = os.path.join(
-                        self.model_dir_path,
-                        'stage' + str(self.stage) + '_episode' + str(episode) + '.h5')
+                        self.model_dir_path, f'stage{self.stage:05d}_episode{episode:05d}.h5')
+                        #'stage' + str(self.stage:05d) + '_episode' + str(episode) + '.h5')
                     self.model.save(self.model_path)
+                    self.model.save(os.path.join(self.training_path_comp, f'stage{self.stage:05d}_episode{episode:05d}.h5'))
+                    with open(os.path.join(self.training_path_comp, f'stage{self.stage:05d}_episode{episode:05d}.json'),'w') as out2:
+                        json.dump(param_dictionary,out2)
                     with open(
                         os.path.join(
                             self.model_dir_path,
-                            'stage' + str(self.stage) + '_episode' + str(episode) + '.json'
+                            f'stage{self.stage:05d}_episode{episode:05d}.json'
                         ),
                         'w'
                     ) as outfile:
                         json.dump(param_dictionary, outfile)
+                
 
     def env_make(self):
         while not self.make_environment_client.wait_for_service(timeout_sec=1.0):
