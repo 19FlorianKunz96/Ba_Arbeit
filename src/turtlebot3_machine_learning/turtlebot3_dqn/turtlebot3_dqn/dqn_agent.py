@@ -190,6 +190,7 @@ class DQNAgent(Node):
             'Folder Name' : self.training_dir,
             'Learned from older Stages' : self.stage_boost,
             'Learned from Model' : {'Folder' : self.load_from_folder,'Stage':self.load_from_stage, 'Episode': self.load_from_episode},
+            #'Success' : self.info,  später in extra file speichern zb. training logs
             'State Size' : self.state_size,
             'Action Szie' : self.action_size,
             'Maximum Episodes' : self.max_training_episodes,

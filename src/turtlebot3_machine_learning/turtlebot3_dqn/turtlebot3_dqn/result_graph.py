@@ -20,6 +20,10 @@
 import signal
 import sys
 import threading
+import os
+import csv
+import json
+import pyqtgraph.exporters
 
 from PyQt5.QtCore import QTimer
 from PyQt5.QtWidgets import QApplication
@@ -96,20 +100,61 @@ class Window(QMainWindow):
         self.rewardsPlt.plot(self.ep, self.data_list, pen=(255, 0, 0), clear=True)
         self.qValuePlt.plot(self.ep, self.rewards, pen=(0, 255, 0), clear=True)
 
+    def save_graphs(self, folder_path):
+        self.rewardsPlt.plot(self.ep, self.data_list, pen=(255, 0, 0), clear=True)
+        self.qValuePlt.plot(self.ep, self.rewards, pen=(0, 255, 0), clear=True)
+        export_max_q = pyqtgraph.exporters.ImageExporter(self.qValuePlt.plotItem)
+        export_max_q.parameters()['width'] = 600
+        export_max_q.export(os.path.join(folder_path,'avg_max_q.png'))
+
+        export_rewards = pyqtgraph.exporters.ImageExporter(self.rewardsPlt.plotItem)
+        export_rewards.parameters()['width'] = 600
+        export_rewards.export(os.path.join(folder_path,'total_rewards.png'))
+
+    def save_data_csv(self, folder_path):
+        self.rewardsPlt.plot(self.ep, self.data_list, pen=(255, 0, 0), clear=True)
+        self.qValuePlt.plot(self.ep, self.rewards, pen=(0, 255, 0), clear=True)
+        with open(os.path.join(folder_path,'graph_data.csv'), 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(['Episode', 'Q_value', 'Reward'])
+            for ep, q, r in zip(self.ep, self.data_list, self.rewards):
+                writer.writerow([ep, q, r])
+
     def closeEvent(self, event):
+
+        with open(os.path.join(os.path.dirname(os.path.realpath(__file__)),'temp.json'),'r') as temp:
+            data  = json.load(temp)
+            folder_name = data['folder']
+        os.remove(os.path.join(os.path.dirname(os.path.realpath(__file__)),'temp.json'))
+
+        self.save_graphs(os.path.join(os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))),'trainings_done'),folder_name))
+        self.save_data_csv(os.path.join(os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))),'trainings_done'),folder_name))
+
         if self.ros_subscriber is not None:
             self.ros_subscriber.destroy_node()
         rclpy.shutdown()
         event.accept()
 
 
+
+
 def main():
+
+    #initialize ros client library
     rclpy.init()
     app = QApplication(sys.argv)
     win = Window()
 
     def shutdown_handler(sig, frame):
         print('shutdown')
+        with open(os.path.join(os.path.dirname(os.path.realpath(__file__)),'temp.json'),'r') as temp:
+            data  = json.load(temp)
+            folder_name = data['folder']
+        os.remove(os.path.join(os.path.dirname(os.path.realpath(__file__)),'temp.json'))
+
+        win.save_graphs(os.path.join(os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))),'trainings_done'),folder_name))
+        win.save_data_csv(os.path.join(os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))),'trainings_done'),folder_name))
+
         if win.ros_subscriber is not None:
             win.ros_subscriber.destroy_node()
         rclpy.shutdown()
@@ -117,6 +162,8 @@ def main():
 
     signal.signal(signal.SIGINT, shutdown_handler)
     signal.signal(signal.SIGTERM, shutdown_handler)
+
+
     sys.exit(app.exec())
 
 
