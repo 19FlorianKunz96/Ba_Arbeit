@@ -1,6 +1,6 @@
-#RL-Learning for Turtlebot3
+# RL-Learning for Turtlebot3
 
-##Training with Launchfile
+## Training with Launchfile
 1. set environtment variable "TURTLEBOT3_MODEL:=wallfe_pi" in bash file (if other robots are used, adjust the value) to load the robot in gazebo, otherwise the node will hang and the world will not load correctly in future
 2. starting launchfile in x-terminal-emulator with 'ros2 launch turtlebot3_gazebo training_setup.launch.py
    - here you can set some parameters:
@@ -12,6 +12,6 @@
      - with load_from_episode:= you can adjust the episode for loading weights(just rational if load_from_folder is not 'actual').Default value is 100 and its required to plug in an integer value.
 3. after training the weights(every 50 episodes), the epsilons, a config file from the training and the graphs are stored in the machine learning package in a folder 'trainings_done/{uuid}_{date}_{stage}'
 
-##Test the agent
+## Test the agent
 1. to test the agent you can run the node from the tutorial: 'ros2 run turtlebot3_dqn dqn_test TODO: adjust the file to load from an training from folder'trainings_done''
    - here you can set some parameters:
