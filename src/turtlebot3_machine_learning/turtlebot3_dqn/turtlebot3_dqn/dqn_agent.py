@@ -94,6 +94,7 @@ class DQNAgent(Node):
         self.done = False
         self.succeed = False
         self.fail = False
+        self.info = ['Adjusted Epsilon, Reward set on -100 if collision']
 
         self.discount_factor = 0.99
         self.learning_rate = 0.0007
@@ -157,30 +158,31 @@ class DQNAgent(Node):
             if self.load_from_folder == 'actual':
                 files = os.listdir(self.model_dir_path)
                 stage_files = [f for f in files if f.startswith('stage') and f.endswith('.h5')]#TODO doesnt sort correctly because of the numbers
-                stage_files.sort()     
+                sorted_stage_files = sorted(stage_files,key=lambda x:int(x[-8:-5]))
+                sorted_stage_files.sort(key= lambda x: int(x[5:10])) 
 
                 if stage_files:
                     self.last_model_path = os.path.join(self.model_dir_path, stage_files[-1])
                     self.model.set_weights(load_model(self.last_model_path).get_weights())
-                    self.epsilon = 0.2
-                    # self.get_logger().info(f'Epsilon angepasst auf {self.epsilon}')
-                    self.update_target_model() #????
-                    self.info = 'last actual pre-trained model loaded'
+                    self.epsilon = 0.65
+                    self.update_target_model()
+                    self.info.append('last actual pre-trained model loaded, target model updated')
                     self.get_logger().info('last actual pre-trained model loaded')
                 else:
                     self.get_logger().warn('No training data in previous stages')
-                    self.info='No training data in previous stages'
+                    self.info.append('No training data in previous stages')
             else:
                 self.file_root = os.path.join(self.training_dir_path,
                                                os.path.join(self.load_from_folder,
                                                 f'stage{self.load_from_stage:05d}_episode{self.load_from_episode:05d}.h5'))
                 if os.path.exists(self.file_root) == True:
                     self.model.set_weights(load_model(self.file_root).get_weights())
-                    self.epsilon = 0.2
-                    self.info = 'Weights successfully loaded'
+                    self.epsilon = 0.65
+                    self.update_target_model()
+                    self.info.append('Weights successfully loaded, target model updated')
                     self.get_logger().info('Weights successfully loaded')
                 else:
-                    self.info = 'File doesnt exist. No weights loaded'
+                    self.info.append('File doesnt exist. No weights loaded')
                     self.get_logger().warn('File doesnt exist. No weights loaded')
 
 
@@ -190,7 +192,7 @@ class DQNAgent(Node):
             'Folder Name' : self.training_dir,
             'Learned from older Stages' : self.stage_boost,
             'Learned from Model' : {'Folder' : self.load_from_folder,'Stage':self.load_from_stage, 'Episode': self.load_from_episode},
-            #'Success' : self.info,  später in extra file speichern zb. training logs
+            'Success' : self.info,
             'State Size' : self.state_size,
             'Action Szie' : self.action_size,
             'Maximum Episodes' : self.max_training_episodes,
@@ -244,11 +246,19 @@ class DQNAgent(Node):
             while True:
                 local_step += 1
 
+                #berchnet die q-values für alle actions im aktuellen Schritt. 
                 q_values = self.model.predict(state)
+
+                #schaut welcher der größte ist.Nur für den Graphen ??
                 sum_max_q += float(numpy.max(q_values))
 
+                #Sucht die Action mit größtem Reward durch Prediction und Argmax
                 action = int(self.get_action(state))
+
+                #.step() gibt die action weiter an environment, welches Werte berechnet, wieder zurückgibt und folgende Werte als return liefert
                 next_state, reward, done = self.step(action)
+
+                #score rechnet die rewards aus allen schrittenzusammen
                 score += reward
 
                 msg = Float32MultiArray()
@@ -256,7 +266,10 @@ class DQNAgent(Node):
                 self.action_pub.publish(msg)
 
                 if self.train_mode:
+                    #added den Schritt als Sample in die EpisodenCollection
                     self.append_sample((state, action, reward, next_state, done))
+
+                    #
                     self.train_model(done)
 
                 state = next_state
@@ -403,14 +416,21 @@ class DQNAgent(Node):
         self.replay_memory.append(transition)
 
     def train_model(self, terminal):
+
+        #wenn die collection größer ist als min batch size, dann suche dir aus der collection einen random batch mit der grösse batchsize
         if len(self.replay_memory) < self.min_replay_memory_size:
             return
         data_in_mini_batch = random.sample(self.replay_memory, self.batch_size)
 
+
+        #nur vorwärtspfade, da die normale cost funktion nicht genommen werden kann
+        #predicted q-value für den aktuellen state
         current_states = numpy.array([transition[0] for transition in data_in_mini_batch])
         current_states = current_states.squeeze()
         current_qvalues_list = self.model.predict(current_states)
 
+        #predicted werte, aus predicteten werten, da next_states in process() ja aus dem aktuellen state predicted wird.
+        #rewards , wenn eine action gemacht wird und danach optimal verhalten wird
         next_states = numpy.array([transition[3] for transition in data_in_mini_batch])
         next_states = next_states.squeeze()
         next_qvalues_list = self.target_model.predict(next_states)

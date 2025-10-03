@@ -51,7 +51,7 @@ class DQNTest(Node):
         model_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.realpath(__file__))),
             'saved_model',
-            f'stage{self.stage}_episode{self.load_episode}.h5'
+            f'stage{self.stage:05d}_episode{self.load_episode:05d}.h5'
         )
 
         loaded_model = load_model(

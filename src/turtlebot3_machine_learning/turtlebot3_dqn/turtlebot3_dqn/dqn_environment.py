@@ -54,6 +54,7 @@ class RLEnvironment(Node):
         self.done = False
         self.fail = False
         self.succeed = False
+        self.collision = False
 
         self.goal_angle = 0.0
         self.goal_distance = 1.0
@@ -174,6 +175,7 @@ class RLEnvironment(Node):
         else:
             self.get_logger().error('task failed service call failed')
 
+#---------------------------------get the sensor data from gazebo----------------------------------------------------------------
     def scan_sub_callback(self, scan):
         self.scan_ranges = []
         self.front_ranges = []
@@ -225,6 +227,7 @@ class RLEnvironment(Node):
         self.goal_distance = goal_distance
         self.goal_angle = goal_angle
 
+#-------------------------------------------------calculate the state from sensor data------------------------------------------------------
     def calculate_state(self):
         state = []
         state.append(float(self.goal_distance))
@@ -248,6 +251,8 @@ class RLEnvironment(Node):
             self.get_logger().info('Collision happened')
             self.fail = True
             self.done = True
+            self.collision = True
+            self.collision = True
             if ROS_DISTRO == 'humble':
                 self.cmd_vel_pub.publish(Twist())
             else:
@@ -267,7 +272,8 @@ class RLEnvironment(Node):
             self.call_task_failed()
 
         return state
-
+    
+#------------------------------------------------reward functions----------------------------------------------------------------
     def compute_directional_weights(self, relative_angles, max_weight=10.0):
         power = 6
         raw_weights = (numpy.cos(relative_angles))**power + 0.1
@@ -312,11 +318,17 @@ class RLEnvironment(Node):
 
         if self.succeed:
             reward = 100.0
+
         elif self.fail:
             reward = -50.0
 
-        return reward
+            #hard point penalty for collisions
+            if self.collision:
+                reward -= 50
 
+        return reward
+    
+#--------------------------------callbacks-----------------------------------------------------------------
     def rl_agent_interface_callback(self, request, response):
         action = request.action
         if ROS_DISTRO == 'humble':
