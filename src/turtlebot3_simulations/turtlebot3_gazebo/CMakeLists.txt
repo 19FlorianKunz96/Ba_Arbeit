@@ -47,7 +47,7 @@ set(dependencies
   "sensor_msgs"
   "tf2"
 )
-
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(EXEC_NAME "turtlebot3_drive")
 
 add_executable(${EXEC_NAME} src/turtlebot3_drive.cpp)
@@ -70,9 +70,24 @@ target_link_libraries(obstacles ${GAZEBO_LIBRARIES})
 
 ################################################################################
 # Install
+# adjusted for moving obstacles
 ################################################################################
+
+
 install(TARGETS ${EXEC_NAME}
+  RUNTIME
   DESTINATION lib/${PROJECT_NAME}
+)
+
+
+install(TARGETS
+  traffic_light_plugin
+  traffic_bar_plugin
+  obstacle1
+  obstacle2
+  obstacles
+  LIBRARY DESTINATION lib/${PROJECT_NAME}
+  ARCHIVE DESTINATION lib/${PROJECT_NAME}
 )
 
 install(DIRECTORY launch models rviz urdf worlds
@@ -83,6 +98,16 @@ install(DIRECTORY include/
   DESTINATION include/
 )
 
+# Configure and install ament environment hook
+configure_file(
+  ament_env_hooks/50_turtlebot3_gazebo.sh.in
+  ${CMAKE_CURRENT_BINARY_DIR}/50_turtlebot3_gazebo.sh @ONLY
+)
+
+install(FILES
+  ${CMAKE_CURRENT_BINARY_DIR}/50_turtlebot3_gazebo.sh
+  DESTINATION share/${PROJECT_NAME}/ament_environment_hooks
+)
 ################################################################################
 # Macro for ament package
 ################################################################################

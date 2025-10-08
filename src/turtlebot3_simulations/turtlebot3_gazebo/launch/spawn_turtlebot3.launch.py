@@ -23,9 +23,6 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     # Get the urdf file
-    #adjustet turtlebot model with waffle_pi instead of environment variable
-    #TURTLEBOT3_MODEL = 'waffle_pi'
-
     TURTLEBOT3_MODEL = os.environ['TURTLEBOT3_MODEL']
     model_folder = 'turtlebot3_' + TURTLEBOT3_MODEL
     urdf_path = os.path.join(
@@ -40,10 +37,6 @@ def generate_launch_description():
     y_pose = LaunchConfiguration('y_pose', default='0.0')
 
     # Declare the launch arguments
-
-
-
-
     declare_x_position_cmd = DeclareLaunchArgument(
         'x_pose', default_value='0.0',
         description='Specify namespace of the robot')
