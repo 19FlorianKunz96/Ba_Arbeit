@@ -74,8 +74,9 @@ def generate_launch_description():
                                                                                                               'load_from_episode' : load_from_episode}],)
     node4= Node(package = 'turtlebot3_dqn',executable='action_graph',name='ActionGraph',output = 'screen',)
     node5= Node(package = 'turtlebot3_dqn',executable='result_graph',name='ResultGraph',output = 'screen',)
+    node6= Node(package = 'turtlebot3_dqn',executable='loss_graph',name='LossGraph',output = 'screen',)
 
-    node_list=[node1,node2,node3,node4,node5]
+    node_list=[node1,node2,node3,node4,node5,node6]
     for node in node_list:
         ld.add_action(node)
 

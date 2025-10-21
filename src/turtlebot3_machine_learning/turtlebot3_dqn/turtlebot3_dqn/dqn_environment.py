@@ -34,6 +34,7 @@ from std_srvs.srv import Empty
 
 from turtlebot3_msgs.srv import Dqn
 from turtlebot3_msgs.srv import Goal
+#from sklearn.preprocessing import MinMaxScaler
 
 
 ROS_DISTRO = os.environ.get('ROS_DISTRO')
@@ -54,7 +55,6 @@ class RLEnvironment(Node):
         self.done = False
         self.fail = False
         self.succeed = False
-        self.collision = False
 
         self.goal_angle = 0.0
         self.goal_distance = 1.0
@@ -251,8 +251,6 @@ class RLEnvironment(Node):
             self.get_logger().info('Collision happened')
             self.fail = True
             self.done = True
-            self.collision = True
-            self.collision = True
             if ROS_DISTRO == 'humble':
                 self.cmd_vel_pub.publish(Twist())
             else:
@@ -312,6 +310,7 @@ class RLEnvironment(Node):
     def calculate_reward(self):
         yaw_reward = 1 - (2 * abs(self.goal_angle) / math.pi)
         obstacle_reward = self.compute_weighted_obstacle_reward()
+        
 
         print('directional_reward: %f, obstacle_reward: %f' % (yaw_reward, obstacle_reward))
         reward = yaw_reward + obstacle_reward
@@ -321,10 +320,6 @@ class RLEnvironment(Node):
 
         elif self.fail:
             reward = -50.0
-
-            #hard point penalty for collisions
-            if self.collision:
-                reward -= 50
 
         return reward
     

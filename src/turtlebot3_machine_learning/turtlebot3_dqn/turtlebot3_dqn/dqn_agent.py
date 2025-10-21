@@ -42,6 +42,8 @@ from tensorflow.keras.models import load_model
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.optimizers import Adam
 
+from collections import deque
+
 from turtlebot3_msgs.srv import Dqn
 
 
@@ -94,7 +96,7 @@ class DQNAgent(Node):
         self.done = False
         self.succeed = False
         self.fail = False
-        self.info = ['Adjusted Epsilon, Reward set on -100 if collision']
+        self.info = ['Default']
 
         self.discount_factor = 0.99
         self.learning_rate = 0.0007
@@ -119,6 +121,9 @@ class DQNAgent(Node):
         self.update_target_model()
         self.update_target_after = 5000
         self.target_update_after_counter = 0
+
+        self.history=None
+        self.history_target=None
 
         #set this to True and adjust the load_episode to continue training on the same stage
         #be careful: higher stages already will have used the weights of lower parameters
@@ -209,7 +214,7 @@ class DQNAgent(Node):
         }
         
         if LOGGING:
-            tensorboard_file_name = current_time + ' dqn_stage' + str(self.stage) + '_reward'
+            tensorboard_file_name = self.training_dir
             home_dir = os.path.expanduser('~')
             dqn_reward_log_dir = os.path.join(
                 home_dir, 'turtlebot3_dqn_logs', 'gradient_tape', tensorboard_file_name
@@ -223,6 +228,7 @@ class DQNAgent(Node):
 
         self.action_pub = self.create_publisher(Float32MultiArray, '/get_action', 10)
         self.result_pub = self.create_publisher(Float32MultiArray, 'result', 10)
+        self.loss_pub = self.create_publisher(Float32MultiArray,'loss',10)
 
         self.process()
 
@@ -247,6 +253,7 @@ class DQNAgent(Node):
                 local_step += 1
 
                 #berchnet die q-values für alle actions im aktuellen Schritt. 
+                #Bei jedem step frisch trainiertes model
                 q_values = self.model.predict(state)
 
                 #schaut welcher der größte ist.Nur für den Graphen ??
@@ -357,12 +364,9 @@ class DQNAgent(Node):
     def get_action(self, state):
         if self.train_mode:
             self.step_counter += 1
-            #adjusted for different epsilon values(1.0-->self.epsilon)
-            # self.epsilon = self.epsilon_min + (self.epsilon - self.epsilon_min) * math.exp(
-            #     -self.epsilon * self.step_counter / self.epsilon_decay)         
-            # 
-            # --complete new--
-            self.epsilon = self.epsilon_min + (self.epsilon_start - self.epsilon_min) * math.exp(-self.step_counter / self.epsilon_decay)              
+            self.epsilon = self.epsilon_min + (1.0 - self.epsilon_min) * math.exp(
+                -1.0 * self.step_counter / self.epsilon_decay)         
+                     
             lucky = random.random()
             if lucky > (1 - self.epsilon):
                 result = random.randint(0, self.action_size - 1)
@@ -431,37 +435,63 @@ class DQNAgent(Node):
 
         #predicted werte, aus predicteten werten, da next_states in process() ja aus dem aktuellen state predicted wird.
         #rewards , wenn eine action gemacht wird und danach optimal verhalten wird
+        #deswegen target model, das nicht immer geupdated wird, sonst würde man ja nie konvergieren
         next_states = numpy.array([transition[3] for transition in data_in_mini_batch])
         next_states = next_states.squeeze()
         next_qvalues_list = self.target_model.predict(next_states)
 
         x_train = []
         y_train = []
-
+        
+        #geht den ganzen batch durch
         for index, (current_state, action, reward, _, done) in enumerate(data_in_mini_batch):
+
+            #aktuelle zeile des batches in der qvaluelist
             current_q_values = current_qvalues_list[index]
 
+            #wenn es nicht der endstep war
             if not done:
+                #nehme den größten zukunfts-qwert(value estimation) aus dem aktuellen sample der nextqvalues list
                 future_reward = numpy.max(next_qvalues_list[index])
+                #das ist unser eigentlicher Y-Wert 
                 desired_q = reward + self.discount_factor * future_reward
             else:
                 desired_q = reward
-
+            '''Desired_Q ist das, was eigentlich für Q(s,a) herauskommen sollte. Die Lösung der Bellmann Gleichung.
+            desired_q ersetzt den Q-Wert der ausgeführten Aktion in current_q_values, um das Trainingsziel (y_train) zu bilden.
+            Die anderen Aktionswerte bleiben unverändert, weil für sie keine neuen Informationen vorliegen.
+            Denn die Rewards für die anderen Actions können wir nicht durch die Gleichung herausfinden, da wir die Wege nicht gegangen sind und somit
+            keine Werte für NextStates für diese Actions haben.
+            Die eigentliche Cost-Funktion findet in model.fit statt. Hier wird die current_q_values_list neu berechnet und als y_ist verwendet.'''
+            #Ziel qwerte sollen für die gemachte action den gewünschten reward ausgeben
             current_q_values[action] = desired_q
             x_train.append(current_state)
             y_train.append(current_q_values)
-
+            '''In jedem Sample berechne ich den Q-Wert durch Prediction des States. Das sind die Rewards für jede Aktion, wenn ich mich danach
+             optimal verhalte. Ich habe auch den Reward für diesen State.  Ich hatte aber eine Erfahrung gemacht, indem mein Netz schon um dieses
+             Sample zu erstllen eine Prediction gemacht hat und dadurch einen Next State erhalten. Wenn ich wieder diesen Next State predicte und 
+             den größten Wert nehme, habe ich den Reward wenn ich nach dem State alles optimal gemacht hätte. Zusammen mit dem Reward habe ich alle
+             Komponenten für die Bellman Gleichung um damit mein y-gewollt zu bekommen. Mein Q-Wert des States ist dann mein Y_ist. 
+             
+             Mein Y_Gewollt basiert aber auf NextState, was auch schon eine Prediction war. Wenn ich beide Elemente der Loss Funktion mit dem 
+             selben Modell Predicte, ändern sich immer beide Werte und ich kann nie die Prediction des States an die Lösung der Bellmann-Gleichung(die
+             die Prediction des next States beinhaltet) konvergieren. Deshalb brauche ich ein extra Target Netz, dass nur seltener geupdatet wird.'''
         x_train = numpy.array(x_train)
         y_train = numpy.array(y_train)
         x_train = numpy.reshape(x_train, [len(data_in_mini_batch), self.state_size])
         y_train = numpy.reshape(y_train, [len(data_in_mini_batch), self.action_size])
 
-        self.model.fit(
+        self.history = self.model.fit(
             tensorflow.convert_to_tensor(x_train, tensorflow.float32),
             tensorflow.convert_to_tensor(y_train, tensorflow.float32),
             batch_size=self.batch_size, verbose=0
         )
         self.target_update_after_counter += 1
+
+        if self.step_counter % 50 == 0:
+            msg=Float32MultiArray()
+            msg.data = [float(self.history.history['loss'][-1]), float(self.step_counter)]
+            self.loss_pub.publish(msg)
 
         if self.target_update_after_counter > self.update_target_after and terminal:
             self.update_target_model()

@@ -32,8 +32,10 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
+            'loss_graph = turtlebot3_dqn.loss_graph:main',
             'action_graph = turtlebot3_dqn.action_graph:main',
             'dqn_agent = turtlebot3_dqn.dqn_agent:main',
+            'rainbow_agent = turtlebot3_dqn.rainbow_agent:main',
             'dqn_environment = turtlebot3_dqn.dqn_environment:main',
             'dqn_gazebo = turtlebot3_dqn.dqn_gazebo:main',
             'dqn_test = turtlebot3_dqn.dqn_test:main',

@@ -1,22 +1,3 @@
-#!/usr/bin/env python
-#################################################################################
-# Copyright 2018 ROBOTIS CO., LTD.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-#################################################################################
-#
-# Authors: Ryan Shim, Gilbert, ChanHyeong Lee
-
 import signal
 import sys
 import threading
@@ -37,13 +18,13 @@ from std_msgs.msg import Float32MultiArray
 class GraphSubscriber(Node):
 
     def __init__(self, window):
-        super().__init__('graph')
+        super().__init__('loss_graph')
 
         self.window = window
 
         self.subscription = self.create_subscription(
             Float32MultiArray,
-            '/result',
+            'loss',
             self.data_callback,
             10
         )
@@ -58,12 +39,11 @@ class Window(QMainWindow):
     def __init__(self):
         super(Window, self).__init__()
 
-        self.setWindowTitle('Result')
+        self.setWindowTitle('Loss')
         self.setGeometry(50, 50, 600, 650)
 
         self.ep = []
-        self.data_list = []
-        self.rewards = []
+        self.loss_list = []
         self.count = 1
 
         self.plot()
@@ -75,17 +55,13 @@ class Window(QMainWindow):
         self.ros_thread.start()
 
     def receive_data(self, msg):
-        self.data_list.append(msg.data[0])
-        self.ep.append(self.count)
+        self.loss_list.append(msg.data[0])
+        self.ep.append(msg.data[1])
         self.count += 1
-        self.rewards.append(msg.data[1])
 
     def plot(self):
-        self.qValuePlt = pyqtgraph.PlotWidget(self, title='Average max Q-value')
-        self.qValuePlt.setGeometry(0, 320, 600, 300)
-
-        self.rewardsPlt = pyqtgraph.PlotWidget(self, title='Total reward')
-        self.rewardsPlt.setGeometry(0, 10, 600, 300)
+        self.lossPlt = pyqtgraph.PlotWidget(self, title='Loss')
+        self.lossPlt.setGeometry(0, 320, 600, 300)
 
         self.timer = QTimer()
         self.timer.timeout.connect(self.update)
@@ -94,31 +70,23 @@ class Window(QMainWindow):
         self.show()
 
     def update(self):
-        self.rewardsPlt.showGrid(x=True, y=True)
-        self.qValuePlt.showGrid(x=True, y=True)
+        self.lossPlt.showGrid(x=True, y=True)
+        self.lossPlt.plot(self.ep, self.loss_list, pen=(255, 0, 0), clear=True)
 
-        self.rewardsPlt.plot(self.ep, self.data_list, pen=(255, 0, 0), clear=True)
-        self.qValuePlt.plot(self.ep, self.rewards, pen=(0, 255, 0), clear=True)
 
     def save_graphs(self, folder_path):
-        self.rewardsPlt.plot(self.ep, self.data_list, pen=(255, 0, 0), clear=True)
-        self.qValuePlt.plot(self.ep, self.rewards, pen=(0, 255, 0), clear=True)
-        export_max_q = pyqtgraph.exporters.ImageExporter(self.qValuePlt.plotItem)
-        export_max_q.parameters()['width'] = 600
-        export_max_q.export(os.path.join(folder_path,'avg_max_q.png'))
-
-        export_rewards = pyqtgraph.exporters.ImageExporter(self.rewardsPlt.plotItem)
-        export_rewards.parameters()['width'] = 600
-        export_rewards.export(os.path.join(folder_path,'total_rewards.png'))
+        self.lossPlt.plot(self.ep, self.loss_list, pen=(255, 0, 0), clear=True)
+        export_loss = pyqtgraph.exporters.ImageExporter(self.lossPlt.plotItem)
+        export_loss.parameters()['width'] = 600
+        export_loss.export(os.path.join(folder_path,'loss.png'))
 
     def save_data_csv(self, folder_path):
-        self.rewardsPlt.plot(self.ep, self.data_list, pen=(255, 0, 0), clear=True)
-        self.qValuePlt.plot(self.ep, self.rewards, pen=(0, 255, 0), clear=True)
-        with open(os.path.join(folder_path,'graph_data.csv'), 'w', newline='') as f:
+        self.lossPlt.plot(self.ep, self.loss_list, pen=(255, 0, 0), clear=True)
+        with open(os.path.join(folder_path,'loss_data.csv'), 'w', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow(['Episode', 'Q_value', 'Reward'])
-            for ep, q, r in zip(self.ep, self.data_list, self.rewards):
-                writer.writerow([ep, q, r])
+            writer.writerow(['Episode', 'Loss'])
+            for ep, l in zip(self.ep, self.loss_list):
+                writer.writerow([ep, l])
 
     def closeEvent(self, event):
 
