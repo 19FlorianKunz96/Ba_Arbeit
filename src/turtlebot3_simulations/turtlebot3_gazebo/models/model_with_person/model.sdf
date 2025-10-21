@@ -1,0 +1,375 @@
+<?xml version='1.0'?>
+<sdf version='1.7'>
+  <model name='model_with_person'>
+    <model name='Forklift'>
+      <link name='base_link'>
+        <visual name='base_visual'>
+          <geometry>
+            <mesh>
+              <uri>base_visual.glb</uri>
+            </mesh>
+          </geometry>
+        </visual>
+        <collision name='forklift_b132_collider_cylinder'>
+          <pose>-0.455378 0.684627 0.285136 0 1.5708 0</pose>
+          <geometry>
+            <cylinder>
+              <radius>0.284716</radius>
+              <length>0.224494</length>
+            </cylinder>
+          </geometry>
+        </collision>
+        <collision name='forklift_b129_collider_cylinder'>
+          <pose>-0.465442 -0.557447 0.222519 0 1.5708 0</pose>
+          <geometry>
+            <cylinder>
+              <radius>0.238229</radius>
+              <length>0.161316</length>
+            </cylinder>
+          </geometry>
+        </collision>
+        <collision name='forklift_b128_collider_cylinder'>
+          <pose>0.455379 0.684627 0.285136 0 1.5708 0</pose>
+          <geometry>
+            <cylinder>
+              <radius>0.284716</radius>
+              <length>0.224494</length>
+            </cylinder>
+          </geometry>
+        </collision>
+        <collision name='forklift_b125_collider_cylinder'>
+          <pose>0.465442 -0.557447 0.222519 0 1.5708 0</pose>
+          <geometry>
+            <cylinder>
+              <radius>0.238229</radius>
+              <length>0.161316</length>
+            </cylinder>
+          </geometry>
+        </collision>
+        <collision name='forklift_b044_collider_box'>
+          <pose>0.263007 1.6849 0.149 0 1.5708 0</pose>
+          <geometry>
+            <box>
+              <size>0.034368 1.2192 0.127</size>
+            </box>
+          </geometry>
+        </collision>
+        <collision name='forklift_b094_collider_box'>
+          <pose>-0.263007 1.6849 0.149 0 1.5708 0</pose>
+          <geometry>
+            <box>
+              <size>0.034368 1.2192 0.127</size>
+            </box>
+          </geometry>
+        </collision>
+        <collision name='forklift_b094_collider_box.001'>
+          <pose>-0.263007 1.08743 0.393275 0 1.5708 0</pose>
+          <geometry>
+            <box>
+              <size>0.522919 0.024258 0.127</size>
+            </box>
+          </geometry>
+        </collision>
+        <collision name='forklift_b044_collider_box.001'>
+          <pose>0.263007 1.08743 0.393275 0 1.5708 0</pose>
+          <geometry>
+            <box>
+              <size>0.522919 0.024273 0.127</size>
+            </box>
+          </geometry>
+        </collision>
+        <collision name='forklift_b033_collider_box'>
+          <pose>0 1.05008 0.674221 0 1.5708 0</pose>
+          <geometry>
+            <box>
+              <size>1.03976 0.075838 1.08461</size>
+            </box>
+          </geometry>
+        </collision>
+        <collision name='forklift_b026_collider_box'>
+          <pose>0 -0.427481 0.582787 0 1.5708 0</pose>
+          <geometry>
+            <box>
+              <size>0.93852 0.893155 1.0922</size>
+            </box>
+          </geometry>
+        </collision>
+        <collision name='forklift_b026_collider_box.001'>
+          <pose>0 0.203739 0.381118 0 1.5708 0</pose>
+          <geometry>
+            <box>
+              <size>0.535182 1.34593 1.0922</size>
+            </box>
+          </geometry>
+        </collision>
+        <collision name='forklift_b140_collider_box'>
+          <pose>0 0.851012 1.06373 0 1.5708 0</pose>
+          <geometry>
+            <box>
+              <size>1.87013 0.222264 0.721164</size>
+            </box>
+          </geometry>
+        </collision>
+        <collision name='forklift_b139_collider_box'>
+          <pose>-0 0.798919 1.95054 0 1.5708 0</pose>
+          <geometry>
+            <box>
+              <size>0.034998 0.277386 0.742054</size>
+            </box>
+          </geometry>
+        </collision>
+        <collision name='forklift_b139_collider_box.001'>
+          <pose>0 0.756692 1.82336 0 1.5708 0</pose>
+          <geometry>
+            <box>
+              <size>0.288451 0.157958 0.440354</size>
+            </box>
+          </geometry>
+        </collision>
+        <collision name='forklift_b140_collider_box.001'>
+          <pose>0 0.878046 0.875679 0 1.5708 0</pose>
+          <geometry>
+            <box>
+              <size>0.22967 0.129587 0.875406</size>
+            </box>
+          </geometry>
+        </collision>
+        <collision name='forklift_b139_collider_box.002'>
+          <pose>-0.000873 0.515486 0.930159 1.5708 1.309 1.5708</pose>
+          <geometry>
+            <box>
+              <size>0.660991 0.220155 0.243121</size>
+            </box>
+          </geometry>
+        </collision>
+        <collision name='forklift_b139_collider_cylinder'>
+          <pose>0 0.338926 1.25832 2.86869 -0 -3.14159</pose>
+          <geometry>
+            <cylinder>
+              <radius>0.114914</radius>
+              <length>0.083365</length>
+            </cylinder>
+          </geometry>
+        </collision>
+        <collision name='forklift_b143_collider_box'>
+          <pose>0.203028 0.395788 1.12102 0.992323 -0.000479 3.14159</pose>
+          <geometry>
+            <box>
+              <size>0.06902 0.360071 0.092192</size>
+            </box>
+          </geometry>
+        </collision>
+        <collision name='forklift_b139_collider_box.003'>
+          <pose>-0.284765 0.466145 0.966224 -1.88131 -0 -3.14159</pose>
+          <geometry>
+            <box>
+              <size>0.075778 0.433645 0.070774</size>
+            </box>
+          </geometry>
+        </collision>
+        <collision name='forklift_b139_collider_box.004'>
+          <pose>-0 0.538142 0.948467 1.5708 -1.32926 -1.5708</pose>
+          <geometry>
+            <box>
+              <size>0.3188 0.148748 0.910215</size>
+            </box>
+          </geometry>
+        </collision>
+        <collision name='forklift_b139_collider_box.005'>
+          <pose>-0.471358 -0.666068 1.55311 0 -0 -1.5708</pose>
+          <geometry>
+            <box>
+              <size>0.062739 0.033 1.03284</size>
+            </box>
+          </geometry>
+        </collision>
+        <collision name='forklift_b139_collider_box.006'>
+          <pose>0.471358 -0.666068 1.55311 0 1.5708 0</pose>
+          <geometry>
+            <box>
+              <size>1.03284 0.062739 0.033</size>
+            </box>
+          </geometry>
+        </collision>
+        <collision name='forklift_b142_collider_box'>
+          <pose>-0 -0.172392 2.05998 -0.023069 -0 -0</pose>
+          <geometry>
+            <box>
+              <size>0.981179 1.1252 0.115755</size>
+            </box>
+          </geometry>
+        </collision>
+        <collision name='forklift_b139_collider_box.007'>
+          <pose>-0.47289 0.481024 1.33457 1.5708 1.32606 1.5708</pose>
+          <geometry>
+            <box>
+              <size>1.50059 0.074299 0.0354</size>
+            </box>
+          </geometry>
+        </collision>
+        <collision name='forklift_b139_collider_box.008'>
+          <pose>0.47289 0.481024 1.33457 1.5708 1.32606 1.5708</pose>
+          <geometry>
+            <box>
+              <size>1.50059 0.074299 0.0354</size>
+            </box>
+          </geometry>
+        </collision>
+        <collision name='forklift_b139_collider_box.009'>
+          <pose>0 -0.343208 1.19017 0 1.5708 0</pose>
+          <geometry>
+            <box>
+              <size>0.39912 0.163592 0.561282</size>
+            </box>
+          </geometry>
+        </collision>
+        <collision name='forklift_b139_collider_box.010'>
+          <pose>0 0.539583 0.734719 -0.393722 -0 -3.14159</pose>
+          <geometry>
+            <box>
+              <size>0.902271 0.740745 0.111237</size>
+            </box>
+          </geometry>
+        </collision>
+        <collision name='forklift_b140_collider_box.002'>
+          <pose>0 0.927693 0.409215 3.14159 -0 0</pose>
+          <geometry>
+            <box>
+              <size>0.834675 0.203935 0.423513</size>
+            </box>
+          </geometry>
+        </collision>
+        <collision name='forklift_b139_collider_box.011'>
+          <pose>0.472881 0.405408 1.37892 1.35924 -0 -3.14159</pose>
+          <geometry>
+            <box>
+              <size>0.016 0.195484 0.11207</size>
+            </box>
+          </geometry>
+        </collision>
+        <collision name='forklift_b139_collider_box.012'>
+          <pose>-0.472881 0.405408 1.37892 0 1.35924 1.5708</pose>
+          <geometry>
+            <box>
+              <size>0.195484 0.016 0.11207</size>
+            </box>
+          </geometry>
+        </collision>
+      </link>
+      <pose>-2.0341 -1.02747 0 0 -0 0</pose>
+    </model>
+    <model name='euro_pallet'>
+      <link name='link'>
+        <pose>0 0 0 0 -0 0</pose>
+        <inertial>
+          <mass>20</mass>
+          <inertia>
+            <ixx>2.43</ixx>
+            <ixy>0</ixy>
+            <ixz>0</ixz>
+            <iyy>1.1</iyy>
+            <iyz>0</iyz>
+            <izz>3.47</izz>
+          </inertia>
+        </inertial>
+        <collision name='collision'>
+          <pose>0 0 0.05 0 -0 0</pose>
+          <geometry>
+            <mesh>
+              <uri>model://euro_pallet/meshes/pallet.dae</uri>
+              <scale>0.1 0.1 0.1</scale>
+            </mesh>
+          </geometry>
+        </collision>
+        <visual name='visual'>
+          <pose>0 0 0.05 0 -0 0</pose>
+          <geometry>
+            <mesh>
+              <uri>model://euro_pallet/meshes/pallet.dae</uri>
+              <scale>0.1 0.1 0.1</scale>
+            </mesh>
+          </geometry>
+        </visual>
+      </link>
+      <pose>-0.077781 -1.30997 0 0 -0 0</pose>
+    </model>
+    <model name='euro_pallet_0'>
+      <link name='link'>
+        <pose>0 0 0 0 -0 0</pose>
+        <inertial>
+          <mass>20</mass>
+          <inertia>
+            <ixx>2.43</ixx>
+            <ixy>0</ixy>
+            <ixz>0</ixz>
+            <iyy>1.1</iyy>
+            <iyz>0</iyz>
+            <izz>3.47</izz>
+          </inertia>
+        </inertial>
+        <collision name='collision'>
+          <pose>0 0 0.05 0 -0 0</pose>
+          <geometry>
+            <mesh>
+              <uri>model://euro_pallet/meshes/pallet.dae</uri>
+              <scale>0.1 0.1 0.1</scale>
+            </mesh>
+          </geometry>
+        </collision>
+        <visual name='visual'>
+          <pose>0 0 0.05 0 -0 0</pose>
+          <geometry>
+            <mesh>
+              <uri>model://euro_pallet/meshes/pallet.dae</uri>
+              <scale>0.1 0.1 0.1</scale>
+            </mesh>
+          </geometry>
+        </visual>
+      </link>
+      <pose>-0.160287 -1.36542 0 0 -0 0</pose>
+    </model>
+    <model name='person_walking'>
+      <link name='link'>
+        <inertial>
+          <pose>0 0 0.95 0 -0 0</pose>
+          <mass>80</mass>
+          <inertia>
+            <ixx>27.82</ixx>
+            <ixy>0</ixy>
+            <ixz>0</ixz>
+            <iyy>24.88</iyy>
+            <iyz>0</iyz>
+            <izz>4.57</izz>
+          </inertia>
+        </inertial>
+        <collision name='bottom'>
+          <pose>0 0 0.01 0 -0 0</pose>
+          <geometry>
+            <box>
+              <size>0.35 0.75 0.02</size>
+            </box>
+          </geometry>
+        </collision>
+        <collision name='person'>
+          <pose>0 0 -0.02 0 -0 0</pose>
+          <geometry>
+            <mesh>
+              <uri>model://person_walking/meshes/walking.dae</uri>
+            </mesh>
+          </geometry>
+        </collision>
+        <visual name='visual'>
+          <pose>0 0 -0.02 0 -0 0</pose>
+          <geometry>
+            <mesh>
+              <uri>model://person_walking/meshes/walking.dae</uri>
+            </mesh>
+          </geometry>
+        </visual>
+      </link>
+      <pose>2.27218 3.70287 0 0 -0 0</pose>
+    </model>
+    <static>0</static>
+    <allow_auto_disable>1</allow_auto_disable>
+  </model>
+</sdf>
