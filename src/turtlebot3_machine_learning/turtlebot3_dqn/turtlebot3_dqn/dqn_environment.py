@@ -55,6 +55,8 @@ class RLEnvironment(Node):
         self.done = False
         self.fail = False
         self.succeed = False
+        self.collission = False
+        self.timeout = False
 
         self.goal_angle = 0.0
         self.goal_distance = 1.0
@@ -251,6 +253,7 @@ class RLEnvironment(Node):
             self.get_logger().info('Collision happened')
             self.fail = True
             self.done = True
+            self.collission = True
             if ROS_DISTRO == 'humble':
                 self.cmd_vel_pub.publish(Twist())
             else:
@@ -262,6 +265,7 @@ class RLEnvironment(Node):
             self.get_logger().info('Time out!')
             self.fail = True
             self.done = True
+            self.timeout = True
             if ROS_DISTRO == 'humble':
                 self.cmd_vel_pub.publish(Twist())
             else:
@@ -346,11 +350,16 @@ class RLEnvironment(Node):
         response.state = self.calculate_state()
         response.reward = self.calculate_reward()
         response.done = self.done
+        response.success = self.succeed
+        response.collission = self.collission
+        response.timeout = self.timeout
 
         if self.done is True:
             self.done = False
             self.succeed = False
             self.fail = False
+            self.collission = False
+            self.timeout = False
 
         return response
 

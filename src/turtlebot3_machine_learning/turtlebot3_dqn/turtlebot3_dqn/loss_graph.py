@@ -44,6 +44,7 @@ class Window(QMainWindow):
 
         self.ep = []
         self.loss_list = []
+        self.epsilon_list = []
         self.count = 1
 
         self.plot()
@@ -57,11 +58,15 @@ class Window(QMainWindow):
     def receive_data(self, msg):
         self.loss_list.append(msg.data[0])
         self.ep.append(msg.data[1])
+        self.epsilon_list.append(msg.data[2])
         self.count += 1
 
     def plot(self):
         self.lossPlt = pyqtgraph.PlotWidget(self, title='Loss')
         self.lossPlt.setGeometry(0, 320, 600, 300)
+
+        self.epsilonPlt = pyqtgraph.PlotWidget(self, title='Epsilon')
+        self.epsilonPlt.setGeometry(0, 10, 600, 300)
 
         self.timer = QTimer()
         self.timer.timeout.connect(self.update)
@@ -71,22 +76,32 @@ class Window(QMainWindow):
 
     def update(self):
         self.lossPlt.showGrid(x=True, y=True)
+        self.epsilonPlt.showGrid(x=True, y=True)
         self.lossPlt.plot(self.ep, self.loss_list, pen=(255, 0, 0), clear=True)
+        self.epsilonPlt.plot(self.ep, self.epsilon_list, pen=(0, 255, 0), clear=True)
 
 
     def save_graphs(self, folder_path):
         self.lossPlt.plot(self.ep, self.loss_list, pen=(255, 0, 0), clear=True)
+        self.epsilonPlt.plot(self.ep, self.epsilon_list, pen=(0, 255, 0), clear=True)
+
         export_loss = pyqtgraph.exporters.ImageExporter(self.lossPlt.plotItem)
         export_loss.parameters()['width'] = 600
         export_loss.export(os.path.join(folder_path,'loss.png'))
 
+        export_epsilon = pyqtgraph.exporters.ImageExporter(self.epsilonPlt.plotItem)
+        export_epsilon.parameters()['width'] = 600
+        export_epsilon.export(os.path.join(folder_path,'epsilon.png'))
+
     def save_data_csv(self, folder_path):
         self.lossPlt.plot(self.ep, self.loss_list, pen=(255, 0, 0), clear=True)
+        self.epsilonPlt.plot(self.ep, self.epsilon_list, pen=(0, 255, 0), clear=True)
+
         with open(os.path.join(folder_path,'loss_data.csv'), 'w', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow(['Episode', 'Loss'])
-            for ep, l in zip(self.ep, self.loss_list):
-                writer.writerow([ep, l])
+            writer.writerow(['Episode', 'Loss','Epsilon'])
+            for ep, l, e in zip(self.ep, self.loss_list, self.epsilon_list):
+                writer.writerow([ep, l, e])
 
     def closeEvent(self, event):
 

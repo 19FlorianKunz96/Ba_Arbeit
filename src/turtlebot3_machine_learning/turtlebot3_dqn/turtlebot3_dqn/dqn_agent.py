@@ -83,10 +83,12 @@ class DQNAgent(Node):
         self.declare_parameter('load_from_folder','actual')
         self.declare_parameter('load_from_stage',1)
         self.declare_parameter('load_from_episode',50)
+        self.declare_parameter('action_space',5)
         self.stage = self.get_parameter('stagex').get_parameter_value().integer_value
         self.train_mode = True
         self.state_size = 26
-        self.action_size = 5
+        #self.action_size = 5
+        self.action_size=self.get_parameter('action_space').get_parameter_value().integer_value
         self.max_training_episodes = self.get_parameter('max_episodes').get_parameter_value().integer_value
 
         self.stage_boost = self.get_parameter('stage_boost').get_parameter_value().bool_value
@@ -96,18 +98,18 @@ class DQNAgent(Node):
         self.done = False
         self.succeed = False
         self.fail = False
-        self.info = ['Default']
+        self.info = ['Default, Expanded Action Space(6)']
 
         self.discount_factor = 0.99
-        self.learning_rate = 0.0007
+        self.learning_rate = 0.0007 #orig 0.0007
         self.epsilon = 1.0
         self.step_counter = 0
         self.epsilon_decay = 6000 * self.stage
         self.epsilon_min = 0.05
-        self.batch_size = 128
+        self.batch_size = 128 #orig 128
 
-        self.replay_memory = collections.deque(maxlen=500000)
-        self.min_replay_memory_size = 5000
+        self.replay_memory = collections.deque(maxlen=500000) #orig 500000
+        self.min_replay_memory_size = 5000 #orig 5000
 
         self.uuid = uuid.uuid4()
         self.date = datetime.date.today()
@@ -182,7 +184,6 @@ class DQNAgent(Node):
                                                 f'stage{self.load_from_stage:05d}_episode{self.load_from_episode:05d}.h5'))
                 if os.path.exists(self.file_root) == True:
                     self.model.set_weights(load_model(self.file_root).get_weights())
-                    self.epsilon = 0.65
                     self.update_target_model()
                     self.info.append('Weights successfully loaded, target model updated')
                     self.get_logger().info('Weights successfully loaded')
@@ -190,8 +191,6 @@ class DQNAgent(Node):
                     self.info.append('File doesnt exist. No weights loaded')
                     self.get_logger().warn('File doesnt exist. No weights loaded')
 
-
-        self.epsilon_start = self.epsilon
         self.hyperparams = {
             'Stage' : self.stage,
             'Folder Name' : self.training_dir,
@@ -203,7 +202,7 @@ class DQNAgent(Node):
             'Maximum Episodes' : self.max_training_episodes,
             'Discount Factor' : self.discount_factor,
             'Learning Rate' : self.learning_rate,
-            'Starting with Epsilon' : self.epsilon_start,
+            'Starting with Epsilon' : self.epsilon,
             'Starting Step Counter' : self.step_counter,
             'Epsilon Decay' : self.epsilon_decay,
             'Minimum Epsilon' : self.epsilon_min,
@@ -386,6 +385,12 @@ class DQNAgent(Node):
 
         future = self.rl_agent_interface_client.call_async(req)
 
+
+        #set this to True and adjust the load_episode to continue training on the same stage
+        #be careful: higher stages already will have used the weights of lower parameters
+        self.load_model = False
+        self.load_episode = 0
+
         rclpy.spin_until_future_complete(self, future)
 
         if future.result() is not None:
@@ -490,7 +495,7 @@ class DQNAgent(Node):
 
         if self.step_counter % 50 == 0:
             msg=Float32MultiArray()
-            msg.data = [float(self.history.history['loss'][-1]), float(self.step_counter)]
+            msg.data = [float(self.history.history['loss'][-1]), float(self.step_counter),float(self.epsilon)]
             self.loss_pub.publish(msg)
 
         if self.target_update_after_counter > self.update_target_after and terminal:
