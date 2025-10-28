@@ -9,6 +9,7 @@ __pycache__/
 /src/turtlebot3_machine_learning/turtlebot3_dqn/saved_model
 /src/turtlebot3_machine_learning/turtlebot3_dqn/trainings_done
 /src/turtlebot3_machine_learning/turtlebot3_dqn/evaluation
+/src/turtlebot3_machine_learning/turtlebot3_dqn/turtlebot3_dqn/temp.json
 
 
 

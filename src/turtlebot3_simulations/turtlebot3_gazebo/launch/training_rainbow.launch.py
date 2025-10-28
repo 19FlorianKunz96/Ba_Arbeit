@@ -69,7 +69,7 @@ def generate_launch_description():
     #----------------------------------------Nodes---------------------------------------------------------------------------
     node1= Node(package = 'turtlebot3_dqn',executable = 'dqn_gazebo',name = 'LocationGoalInit',output = 'screen',parameters=[{'stagex':stage}],)
     node2= Node(package = 'turtlebot3_dqn',executable = 'dqn_environment',name ='Environmet',output = 'screen',parameters=[{'action_space':action_space}],)
-    node3= Node(package = 'turtlebot3_dqn',executable='dqn_agent',name='Agent',output = 'screen',parameters=[{'stagex':stage,
+    node3= Node(package = 'turtlebot3_dqn',executable='rainbow_agent',name='Agent',output = 'screen',parameters=[{'stagex':stage,
                                                                                                               'max_episodes':max_episodes,
                                                                                                               'stage_boost':stage_boost,
                                                                                                               'load_from_folder':load_from_folder,

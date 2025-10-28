@@ -31,7 +31,7 @@ def generate_launch_description():
     load_from_folder_arg = DeclareLaunchArgument('load_from_folder', default_value = 'actual', description = 'plug in foldername for training on older data')
     load_from_stage_arg=DeclareLaunchArgument('load_from_stage', default_value='1',description='plug in start of training stage')
     load_from_episode_arg = DeclareLaunchArgument('load_from_episode', default_value = '50', description = 'plug in start of training episode')
-    action_space_arg = DeclareLaunchArgument('action_space', default_value = '5', description = 'number of possible actions')
+    action_space_arg = DeclareLaunchArgument('action_space', default_value = '6', description = 'number of possible actions')
     ld.add_action(stage_arg)
     ld.add_action(max_episodes_arg)
     ld.add_action(stage_boost_arg)
@@ -68,13 +68,14 @@ def generate_launch_description():
 
     #----------------------------------------Nodes---------------------------------------------------------------------------
     node1= Node(package = 'turtlebot3_dqn',executable = 'dqn_gazebo',name = 'LocationGoalInit',output = 'screen',parameters=[{'stagex':stage}],)
-    node2= Node(package = 'turtlebot3_dqn',executable = 'dqn_environment',name ='Environmet',output = 'screen',parameters=[{'action_space':action_space}],)
+    node2= Node(package = 'turtlebot3_dqn',executable = 'custom_environment',name ='Environmet',output = 'screen',)
     node3= Node(package = 'turtlebot3_dqn',executable='dqn_agent',name='Agent',output = 'screen',parameters=[{'stagex':stage,
                                                                                                               'max_episodes':max_episodes,
                                                                                                               'stage_boost':stage_boost,
                                                                                                               'load_from_folder':load_from_folder,
                                                                                                               'load_from_stage' : load_from_stage,
-                                                                                                              'load_from_episode' : load_from_episode}],)
+                                                                                                              'load_from_episode' : load_from_episode,
+                                                                                                              'action_space':action_space}],)
     node4= Node(package = 'turtlebot3_dqn',executable='action_graph',name='ActionGraph',output = 'screen',)
     node5= Node(package = 'turtlebot3_dqn',executable='result_graph',name='ResultGraph',output = 'screen',)
     node6= Node(package = 'turtlebot3_dqn',executable='loss_graph',name='LossGraph',output = 'screen',)

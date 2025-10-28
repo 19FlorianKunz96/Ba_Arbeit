@@ -57,6 +57,7 @@ class Ros2Subscriber(Node):
         self.qt_thread.signal_action2.emit(0)
         self.qt_thread.signal_action3.emit(0)
         self.qt_thread.signal_action4.emit(0)
+        self.qt_thread.signal_action5.emit(0)
 
         if data[0] == 0:
             self.qt_thread.signal_action0.emit(100)
@@ -68,6 +69,8 @@ class Ros2Subscriber(Node):
             self.qt_thread.signal_action3.emit(100)
         elif data[0] == 4:
             self.qt_thread.signal_action4.emit(100)
+        elif data[0] == 5:
+            self.qt_thread.signal_action5.emit(100)
 
         if len(data) >= 2:
             self.qt_thread.signal_total_reward.emit(str(round(data[-2], 2)))
@@ -81,6 +84,7 @@ class Thread(QThread):
     signal_action2 = pyqtSignal(int)
     signal_action3 = pyqtSignal(int)
     signal_action4 = pyqtSignal(int)
+    signal_action5 = pyqtSignal(int)
     signal_total_reward = pyqtSignal(str)
     signal_reward = pyqtSignal(str)
 
@@ -128,6 +132,11 @@ class Form(QWidget):
         self.pgsb5.setValue(0)
         self.pgsb5.setRange(0, 100)
 
+        self.pgsb6 = QProgressBar()
+        self.pgsb6.setOrientation(Qt.Vertical)
+        self.pgsb6.setValue(0)
+        self.pgsb6.setRange(0, 100)
+
         self.label_total_reward = QLabel('Total reward')
         self.edit_total_reward = QLineEdit('')
         self.edit_total_reward.setDisabled(True)
@@ -141,6 +150,7 @@ class Form(QWidget):
         self.label_left = QLabel('Left')
         self.label_front = QLabel('Front')
         self.label_right = QLabel('Right')
+        self.label_stop = QLabel('Stop')
 
         layout.addWidget(self.label_total_reward, 0, 0)
         layout.addWidget(self.edit_total_reward, 1, 0)
@@ -152,10 +162,12 @@ class Form(QWidget):
         layout.addWidget(self.pgsb3, 0, 6, 4, 1)
         layout.addWidget(self.pgsb4, 0, 7, 4, 1)
         layout.addWidget(self.pgsb5, 0, 8, 4, 1)
+        layout.addWidget(self.pgsb6, 0, 9, 4, 1)
 
         layout.addWidget(self.label_left, 4, 4)
         layout.addWidget(self.label_front, 4, 6)
         layout.addWidget(self.label_right, 4, 8)
+        layout.addWidget(self.label_right, 4, 10)
 
         self.setLayout(layout)
 
@@ -164,6 +176,7 @@ class Form(QWidget):
         qt_thread.signal_action2.connect(self.pgsb3.setValue)
         qt_thread.signal_action3.connect(self.pgsb4.setValue)
         qt_thread.signal_action4.connect(self.pgsb5.setValue)
+        qt_thread.signal_action5.connect(self.pgsb6.setValue)
         qt_thread.signal_total_reward.connect(self.edit_total_reward.setText)
         qt_thread.signal_reward.connect(self.edit_reward.setText)
 
