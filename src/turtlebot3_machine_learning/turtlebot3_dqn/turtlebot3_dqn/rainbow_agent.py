@@ -17,6 +17,8 @@
 #
 # Authors: Ryan Shim, Gilbert, ChanHyeong Lee
 
+'''Agent with Double Network and Dueling Network / Action Space 5 but expandable'''
+
 
 import collections
 import datetime

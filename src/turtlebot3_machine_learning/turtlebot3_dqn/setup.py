@@ -36,6 +36,7 @@ setup(
             'action_graph = turtlebot3_dqn.action_graph:main',
             'dqn_agent = turtlebot3_dqn.dqn_agent:main',
             'rainbow_agent = turtlebot3_dqn.rainbow_agent:main',
+            'per_agent = turtlebot3_dqn.per_agent:main',
             'dqn_environment = turtlebot3_dqn.dqn_environment:main',
             'custom_environment = turtlebot3_dqn.custom_environment:main',
             'dqn_gazebo = turtlebot3_dqn.dqn_gazebo:main',

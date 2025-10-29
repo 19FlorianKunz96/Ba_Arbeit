@@ -17,7 +17,8 @@
 #
 # Authors: Ryan Shim, Gilbert, ChanHyeong Lee
 
-'''Standart Agent / Action Space 5 but expandable'''
+'''Double Network / Dueling Network / Action Space 6 / Prioritized Experience Replay'''
+
 
 import collections
 import datetime
@@ -31,6 +32,7 @@ import uuid
 import json
 import glob
 
+
 import numpy
 import rclpy
 from rclpy.node import Node
@@ -43,38 +45,220 @@ from tensorflow.keras.losses import MeanSquaredError
 from tensorflow.keras.models import load_model
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.optimizers import Adam
+from keras.saving import register_keras_serializable
 
-from collections import deque
 
 from turtlebot3_msgs.srv import Dqn
+
+class SumTree:
+    def __init__(self, capacity: int):
+        self.capacity = capacity
+        self.tree = numpy.zeros(2 * capacity - 1, dtype=numpy.float32)
+        self.data = [None] * capacity
+        self.write = 0
+        self.n_entries = 0
+
+    @property
+    def total(self):
+        return float(self.tree[0])
+
+    def add(self, p: float, data):
+        idx = self.write + self.capacity - 1
+        self.data[self.write] = data
+        self.update(idx, p)
+        self.write = (self.write + 1) % self.capacity
+        self.n_entries = min(self.n_entries + 1, self.capacity)
+
+    def update(self, idx: int, p: float):
+        change = p - self.tree[idx]
+        self.tree[idx] = p
+        parent = (idx - 1) // 2
+        while True:
+            self.tree[parent] += change
+            if parent == 0:
+                break
+            parent = (parent - 1) // 2
+
+    def get(self, s: float):
+        idx = 0
+        while True:
+            left = 2 * idx + 1
+            right = left + 1
+            if left >= len(self.tree):
+                break
+            if s <= self.tree[left]:
+                idx = left
+            else:
+                s -= self.tree[left]
+                idx = right
+        data_index = idx - self.capacity + 1
+        return idx, self.tree[idx], self.data[data_index]
+
+
+class PERBuffer:
+    def __init__(self, capacity, alpha=0.6, beta_start=0.4, beta_frames=200_000, eps=1e-5):
+        self.tree = SumTree(capacity)
+        self.alpha = alpha
+        self.beta_start = beta_start
+        self.beta_frames = beta_frames
+        self.frame = 1
+        self.eps = eps
+        self.max_p = 1.0  # neue Transitions sofort wichtig
+
+    def push(self, s, a, r, s2, done):
+        p = (self.max_p + self.eps) ** self.alpha
+        self.tree.add(p, (s, a, r, s2, done))
+
+    def sample(self, batch_size):
+
+        total = self.tree.total
+        # Nichts zu ziehen? Sauber abbrechen.
+        if total <= 0.0 or self.tree.n_entries == 0:
+            raise RuntimeError("PERBuffer.sample called with empty/zero-total tree")
+
+        segment = total / batch_size
+        idxs, batch, priorities = [], [], []
+        i = 0
+        tries = 0
+        max_tries = batch_size * 10  # Schutz vor Endlosschleifen
+
+        while i < batch_size:
+            if tries > max_tries:
+                break
+            s = numpy.random.uniform(segment * i, segment * (i + 1))
+            idx, p, data = self.tree.get(s)
+            tries += 1
+
+            # Leeres Blatt? Neu ziehen.
+            if data is None or p <= 0.0:
+                continue
+
+            idxs.append(idx)
+            priorities.append(float(p))
+            batch.append(data)
+            i += 1
+
+        if len(batch) < batch_size:
+            # Zu wenig gültige Samples – Caller soll später nochmal versuchen.
+            raise RuntimeError(f"PERBuffer.sample got only {len(batch)} valid samples")
+
+        probs = numpy.asarray(priorities, dtype=numpy.float32) / (total + 1e-12)
+        probs = numpy.clip(probs, 1e-12, 1.0)  # niemals 0
+
+        beta = min(1.0, self.beta_start + (1.0 - self.beta_start) * (self.frame / self.beta_frames))
+        self.frame += 1
+
+        N = max(1, self.tree.n_entries)
+        weights = (N * probs) ** (-beta)
+        weights = weights / (weights.max() + 1e-12)  # vermeiden von NaN/Inf
+
+        return idxs, batch, weights.astype(numpy.float32), probs.astype(numpy.float32)
+
+    def update_priorities(self, idxs, td_errors):
+        td = numpy.asarray(td_errors, dtype=numpy.float64)
+        td = numpy.nan_to_num(td, nan=0.0, posinf=1e6, neginf=0.0)
+        td = numpy.clip(numpy.abs(td) + self.eps, 1e-12, 1e6)
+
+        ps = (td) ** self.alpha
+        self.max_p = max(self.max_p, float(ps.max()))
+        for idx, p in zip(idxs, ps):
+            self.tree.update(int(idx), float(p))
+
+
+
+
 
 
 tensorflow.config.set_visible_devices([], 'GPU')
 
+
 LOGGING = True
 current_time = datetime.datetime.now().strftime('[%mm%dd-%H:%M]')
 
+@register_keras_serializable(package="Custom", name="Dueling_DQN")
+class Dueling_DQN(tensorflow.keras.Model):
+    def __init__(self,n_actions,fc1,fc2,fc3=None, **kwargs):
+        super(Dueling_DQN,self).__init__(**kwargs)
+        self.dense1=tensorflow.keras.layers.Dense(fc1,activation='relu')
+        self.dense2=tensorflow.keras.layers.Dense(fc2,activation='relu')
+        self.dense3=None
+        if fc3 is not None:
+            self.dense3=tensorflow.keras.layers.Dense(fc3,activation='relu')
+        self.A= tensorflow.keras.layers.Dense(n_actions,activation='linear')
+        self.V= tensorflow.keras.layers.Dense(1, activation = 'linear')
+        self.n_actions=int(n_actions)
+        self.fc1 = int(fc1)
+        self.fc2 = int(fc2)
+        self.fc3 = None if fc3 is None else int(fc3)
+
+
+    def call(self,state):
+        x=self.dense1(state)
+        x=self.dense2(x)
+        if self.dense3 is not None:
+            x=self.dense3(x)
+        V= self.V(x)
+        A=self.A(x)
+
+
+        Q= V + (A - tensorflow.math.reduce_mean(A, axis=1, keepdims=True))
+        return Q
+   
+    def advantage(self,state):
+        x=self.dense1(state)
+        x=self.dense2(x)
+        A= self.A(x)
+        return A
+    
+    def get_config(self):
+        config = super().get_config()
+        config.update({
+            "n_actions": self.n_actions,
+            "fc1": self.fc1,
+            "fc2": self.fc2,
+            "fc3": self.fc3,
+        })
+        return config
+    
+    @classmethod
+    def from_config(cls, config):
+        # Standard reicht meist; hier explizit der Klarheit halber
+        return cls(**config)
+
+
+
+
+
+
+
 
 class DQNMetric(tensorflow.keras.metrics.Metric):
+
 
     def __init__(self, name='dqn_metric'):
         super(DQNMetric, self).__init__(name=name)
         self.loss = self.add_weight(name='loss', initializer='zeros')
         self.episode_step = self.add_weight(name='step', initializer='zeros')
 
+
     def update_state(self, y_true, y_pred=0, sample_weight=None):
         self.loss.assign_add(y_true)
         self.episode_step.assign_add(1)
 
+
     def result(self):
         return self.loss / self.episode_step
+
 
     def reset_states(self):
         self.loss.assign(0)
         self.episode_step.assign(0)
 
 
+
+
 class DQNAgent(Node):
+
 
     def __init__(self):       #added param stage_boost for taking weights from last stages
         super().__init__('dqn_agent')
@@ -93,6 +277,7 @@ class DQNAgent(Node):
         self.action_size=self.get_parameter('action_space').get_parameter_value().integer_value
         self.max_training_episodes = self.get_parameter('max_episodes').get_parameter_value().integer_value
 
+
         self.stage_boost = self.get_parameter('stage_boost').get_parameter_value().bool_value
         self.load_from_folder = self.get_parameter('load_from_folder').get_parameter_value().string_value
         self.load_from_stage = self.get_parameter('load_from_stage').get_parameter_value().integer_value
@@ -100,39 +285,58 @@ class DQNAgent(Node):
         self.done = False
         self.succeed = False
         self.fail = False
-        self.info = ['Default, Expanded Action Space(6)']
+        self.info = ['Dueling,Double,Same Network Architecture, HuberLoss, PER, a->0.45,beta frames->150k, lr->0.0003, grad clipping, epsilon decay adjusted']
+
 
         self.discount_factor = 0.99
-        self.learning_rate = 0.0007 #orig 0.0007
+        self.learning_rate = 0.0003
         self.epsilon = 1.0
         self.step_counter = 0
-        self.epsilon_decay = 6000 * self.stage
+        self.epsilon_decay = 30000 #6000 * self.stage
         self.epsilon_min = 0.05
-        self.batch_size = 128 #orig 128
+        self.k=0.5 # for epsilon decay
+        self.batch_size = 128
 
-        self.replay_memory = collections.deque(maxlen=500000) #orig 500000
-        self.min_replay_memory_size = 5000 #orig 5000
+        #-----------------------------------PER-init----------------------------------------------------------------------------------
+        #self.replay_memory = collections.deque(maxlen=500000)
+        #self.min_replay_memory_size = 5000
+
+        self.per = PERBuffer(capacity=500000, alpha=0.45, beta_start=0.4, beta_frames=150_000, eps=1e-5)
+        self.min_replay_memory_size = 5000
+        #------------------------------------------------------------------------------------------------------------------------------
+
+        self.history=None
+
 
         self.uuid = uuid.uuid4()
         self.date = datetime.date.today()
-        self.training_dir = f'{self.uuid}_{self.date}_stage{self.stage}'
+        self.training_dir = f'{self.uuid}_{self.date}_stage{self.stage}_rainbow'
         #give the other nodes the dir
         with open(os.path.join(os.path.dirname(os.path.realpath(__file__)),'temp.json'),'w') as temp:
             json.dump({'folder': self.training_dir},temp)
 
-        self.model = self.create_qnetwork()
-        self.target_model = self.create_qnetwork()
+
+        #self.model = self.create_qnetwork()
+        #self.target_model = self.create_qnetwork()
+        self.model = Dueling_DQN(self.action_size,512,256,128)
+        self.target_model = Dueling_DQN(self.action_size,512,256,128)
+        loss = tensorflow.keras.losses.Huber(delta=1.0, name="huber")
+        self.model.compile(loss=loss, optimizer=Adam(learning_rate=self.learning_rate))
+        _ = self.model(tensorflow.zeros((1, self.state_size)))
+        self.model.summary()
+        self.target_model.compile(loss=loss, optimizer=Adam(learning_rate=self.learning_rate))
+        _ = self.target_model(tensorflow.zeros((1, self.state_size)))
+        self.target_model.summary()
         self.update_target_model()
         self.update_target_after = 5000
         self.target_update_after_counter = 0
 
-        self.history=None
-        self.history_target=None
 
         #set this to True and adjust the load_episode to continue training on the same stage
         #be careful: higher stages already will have used the weights of lower parameters
         self.load_model = False
         self.load_episode = 0
+
 
         self.model_dir_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.realpath(__file__))),
@@ -143,13 +347,17 @@ class DQNAgent(Node):
             'trainings_done'
         )
 
+
         self.training_path_comp = os.path.join(self.training_dir_path,self.training_dir)
 
+
         self.model_path = os.path.join(
+
 
             self.model_dir_path,
             'stage' + str(self.stage) + '_episode' + str(self.load_episode) + '.h5'
         )
+
 
         if self.load_model:
             self.model.set_weights(load_model(self.model_path).get_weights())
@@ -161,6 +369,7 @@ class DQNAgent(Node):
                 self.epsilon = param.get('epsilon')
                 self.step_counter = param.get('step_counter')
 
+
         #Training the stage with the youngest weights
         #stage_boost has to be set in the terminal
         if self.stage_boost == True:
@@ -168,7 +377,8 @@ class DQNAgent(Node):
                 files = os.listdir(self.model_dir_path)
                 stage_files = [f for f in files if f.startswith('stage') and f.endswith('.h5')]#TODO doesnt sort correctly because of the numbers
                 sorted_stage_files = sorted(stage_files,key=lambda x:int(x[-8:-5]))
-                sorted_stage_files.sort(key= lambda x: int(x[5:10])) 
+                sorted_stage_files.sort(key= lambda x: int(x[5:10]))
+
 
                 if stage_files:
                     self.last_model_path = os.path.join(self.model_dir_path, stage_files[-1])
@@ -186,6 +396,7 @@ class DQNAgent(Node):
                                                 f'stage{self.load_from_stage:05d}_episode{self.load_from_episode:05d}.h5'))
                 if os.path.exists(self.file_root) == True:
                     self.model.set_weights(load_model(self.file_root).get_weights())
+                    self.epsilon = 0.65
                     self.update_target_model()
                     self.info.append('Weights successfully loaded, target model updated')
                     self.get_logger().info('Weights successfully loaded')
@@ -193,6 +404,10 @@ class DQNAgent(Node):
                     self.info.append('File doesnt exist. No weights loaded')
                     self.get_logger().warn('File doesnt exist. No weights loaded')
 
+
+
+
+        self.epsilon_start = self.epsilon
         self.hyperparams = {
             'Stage' : self.stage,
             'Folder Name' : self.training_dir,
@@ -204,18 +419,18 @@ class DQNAgent(Node):
             'Maximum Episodes' : self.max_training_episodes,
             'Discount Factor' : self.discount_factor,
             'Learning Rate' : self.learning_rate,
-            'Starting with Epsilon' : self.epsilon,
+            'Starting with Epsilon' : self.epsilon_start,
             'Starting Step Counter' : self.step_counter,
             'Epsilon Decay' : self.epsilon_decay,
             'Minimum Epsilon' : self.epsilon_min,
             'Batch Size' : self.batch_size,
-            'Replay Memory Max' : self.replay_memory.maxlen,
             'Replay Memory Min' : self.min_replay_memory_size,
 
+
         }
-        
+       
         if LOGGING:
-            tensorboard_file_name = self.training_dir
+            tensorboard_file_name = current_time + ' dqn_stage' + str(self.stage) + '_reward'
             home_dir = os.path.expanduser('~')
             dqn_reward_log_dir = os.path.join(
                 home_dir, 'turtlebot3_dqn_logs', 'gradient_tape', tensorboard_file_name
@@ -223,21 +438,27 @@ class DQNAgent(Node):
             self.dqn_reward_writer = tensorflow.summary.create_file_writer(dqn_reward_log_dir)
             self.dqn_reward_metric = DQNMetric()
 
+
         self.rl_agent_interface_client = self.create_client(Dqn, 'rl_agent_interface')
         self.make_environment_client = self.create_client(Empty, 'make_environment')
         self.reset_environment_client = self.create_client(Dqn, 'reset_environment')
+
 
         self.action_pub = self.create_publisher(Float32MultiArray, '/get_action', 10)
         self.result_pub = self.create_publisher(Float32MultiArray, 'result', 10)
         self.loss_pub = self.create_publisher(Float32MultiArray,'loss',10)
 
+
         self.process()
+
 
     def process(self):
         self.env_make()
         time.sleep(1.0)
 
+
         episode_num = self.load_episode
+
 
         for episode in range(self.load_episode + 1, self.max_training_episodes + 1):
             # if episode ==1:
@@ -248,46 +469,59 @@ class DQNAgent(Node):
             score = 0
             sum_max_q = 0.0
 
+
             time.sleep(1.0)
+
 
             while True:
                 local_step += 1
 
-                #berchnet die q-values für alle actions im aktuellen Schritt. 
-                #Bei jedem step frisch trainiertes model
+
+                #berchnet die q-values für alle actions im aktuellen Schritt.
                 q_values = self.model.predict(state)
+
 
                 #schaut welcher der größte ist.Nur für den Graphen ??
                 sum_max_q += float(numpy.max(q_values))
 
+
                 #Sucht die Action mit größtem Reward durch Prediction und Argmax
                 action = int(self.get_action(state))
+
 
                 #.step() gibt die action weiter an environment, welches Werte berechnet, wieder zurückgibt und folgende Werte als return liefert
                 next_state, reward, done = self.step(action)
 
+
                 #score rechnet die rewards aus allen schrittenzusammen
                 score += reward
+
 
                 msg = Float32MultiArray()
                 msg.data = [float(action), float(score), float(reward)]
                 self.action_pub.publish(msg)
 
+
                 if self.train_mode:
                     #added den Schritt als Sample in die EpisodenCollection
                     self.append_sample((state, action, reward, next_state, done))
 
+
                     #
                     self.train_model(done)
 
+
                 state = next_state
+
 
                 if done:
                     avg_max_q = sum_max_q / local_step if local_step > 0 else 0.0
 
+
                     msg = Float32MultiArray()
                     msg.data = [float(score), float(avg_max_q)]
                     self.result_pub.publish(msg)
+
 
                     if LOGGING:
                         self.dqn_reward_metric.update_state(score)
@@ -297,18 +531,22 @@ class DQNAgent(Node):
                             )
                         self.dqn_reward_metric.reset_states()
 
+
                     print(
                         'Episode:', episode,
                         'score:', score,
-                        'memory length:', len(self.replay_memory),
+                        'memory length:', self.per.tree.n_entries,
                         'epsilon:', self.epsilon)
+
 
                     param_keys = ['epsilon', 'step']
                     param_values = [self.epsilon, self.step_counter]
                     param_dictionary = dict(zip(param_keys, param_values))
                     break
 
+
                 time.sleep(0.01)
+
 
             if self.train_mode:
                 #default value : every 100 episodes
@@ -316,6 +554,8 @@ class DQNAgent(Node):
                         os.mkdir(self.training_path_comp)
                         with open(os.path.join(self.training_path_comp,'config.json'),'w') as f:
                             json.dump(self.hyperparams,f)
+
+
 
 
                 if episode % 50 == 0:
@@ -334,7 +574,8 @@ class DQNAgent(Node):
                         'w'
                     ) as outfile:
                         json.dump(param_dictionary, outfile)
-                
+               
+
 
     def env_make(self):
         while not self.make_environment_client.wait_for_service(timeout_sec=1.0):
@@ -342,7 +583,9 @@ class DQNAgent(Node):
                 'Environment make client failed to connect to the server, try again ...'
             )
 
+
         self.make_environment_client.call_async(Empty.Request())
+
 
     def reset_environment(self):
         while not self.reset_environment_client.wait_for_service(timeout_sec=1.0):
@@ -350,7 +593,9 @@ class DQNAgent(Node):
                 'Reset environment client failed to connect to the server, try again ...'
             )
 
+
         future = self.reset_environment_client.call_async(Dqn.Request())
+
 
         rclpy.spin_until_future_complete(self, future)
         if future.result() is not None:
@@ -360,14 +605,18 @@ class DQNAgent(Node):
             self.get_logger().error(
                 'Exception while calling service: {0}'.format(future.exception()))
 
+
         return state
+
 
     def get_action(self, state):
         if self.train_mode:
             self.step_counter += 1
+            #adjusted for different epsilon values(1.0-->self.epsilon)
             self.epsilon = self.epsilon_min + (1.0 - self.epsilon_min) * math.exp(
-                -1.0 * self.step_counter / self.epsilon_decay)         
-                     
+                -1.0 * self.k * self.step_counter / self.epsilon_decay)        
+            
+                      
             lucky = random.random()
             if lucky > (1 - self.epsilon):
                 result = random.randint(0, self.action_size - 1)
@@ -376,24 +625,24 @@ class DQNAgent(Node):
         else:
             result = numpy.argmax(self.model.predict(state))
 
+
         return result
+
 
     def step(self, action):
         req = Dqn.Request()
         req.action = action
 
+
         while not self.rl_agent_interface_client.wait_for_service(timeout_sec=1.0):
             self.get_logger().info('rl_agent interface service not available, waiting again...')
+
 
         future = self.rl_agent_interface_client.call_async(req)
 
 
-        #set this to True and adjust the load_episode to continue training on the same stage
-        #be careful: higher stages already will have used the weights of lower parameters
-        self.load_model = False
-        self.load_episode = 0
-
         rclpy.spin_until_future_complete(self, future)
+
 
         if future.result() is not None:
             next_state = future.result().state
@@ -404,7 +653,9 @@ class DQNAgent(Node):
             self.get_logger().error(
                 'Exception while calling service: {0}'.format(future.exception()))
 
+
         return next_state, reward, done
+
 
     def create_qnetwork(self):
         model = Sequential()
@@ -416,92 +667,97 @@ class DQNAgent(Node):
         model.compile(loss=MeanSquaredError(), optimizer=Adam(learning_rate=self.learning_rate))
         model.summary()
 
+
         return model
+
 
     def update_target_model(self):
         self.target_model.set_weights(self.model.get_weights())
         self.target_update_after_counter = 0
         print('*Target model updated*')
 
+    #----------------------------------------------adjusted for PER------------------------------------------------------------------------------
     def append_sample(self, transition):
-        self.replay_memory.append(transition)
+        s,a,r,s2,d = transition
+        self.per.push(s.squeeze(0), a, r, s2.squeeze(0), d)
+        #self.replay_memory.append(transition)
+
 
     def train_model(self, terminal):
 
+
         #wenn die collection größer ist als min batch size, dann suche dir aus der collection einen random batch mit der grösse batchsize
-        if len(self.replay_memory) < self.min_replay_memory_size:
+        if self.per.tree.n_entries < self.min_replay_memory_size:
             return
-        data_in_mini_batch = random.sample(self.replay_memory, self.batch_size)
-
-
-        #nur vorwärtspfade, da die normale cost funktion nicht genommen werden kann
-        #predicted q-value für den aktuellen state
-        current_states = numpy.array([transition[0] for transition in data_in_mini_batch])
-        current_states = current_states.squeeze()
-        current_qvalues_list = self.model.predict(current_states)
-
-        #predicted werte, aus predicteten werten, da next_states in process() ja aus dem aktuellen state predicted wird.
-        #rewards , wenn eine action gemacht wird und danach optimal verhalten wird
-        #deswegen target model, das nicht immer geupdated wird, sonst würde man ja nie konvergieren
-        next_states = numpy.array([transition[3] for transition in data_in_mini_batch])
-        next_states = next_states.squeeze()
-        next_qvalues_list = self.target_model.predict(next_states)
-
-        x_train = []
-        y_train = []
+        try:
+            idxs, batch, is_w, _ = self.per.sample(self.batch_size)
+        except RuntimeError:
+            return
         
-        #geht den ganzen batch durch
-        for index, (current_state, action, reward, _, done) in enumerate(data_in_mini_batch):
+        batch = [b for b in batch if b is not None and all(x is not None for x in b)]
+        if len(batch) == 0:
+            return
+        
+        B=len(batch)
 
-            #aktuelle zeile des batches in der qvaluelist
-            current_q_values = current_qvalues_list[index]
+        s, a, r, s2, d = map(numpy.array, zip(*batch))
+        s = s.astype(numpy.float32)
+        s2 = s2.astype(numpy.float32)
+        a  = a.astype(numpy.int32)
+        r  = r.astype(numpy.float32)
+        d  = d.astype(numpy.float32)
+        w  = numpy.asarray(is_w[:B], dtype = numpy.float32)
 
-            #wenn es nicht der endstep war
-            if not done:
-                #nehme den größten zukunfts-qwert(value estimation) aus dem aktuellen sample der nextqvalues list
-                future_reward = numpy.max(next_qvalues_list[index])
-                #das ist unser eigentlicher Y-Wert 
-                desired_q = reward + self.discount_factor * future_reward
-            else:
-                desired_q = reward
-            '''Desired_Q ist das, was eigentlich für Q(s,a) herauskommen sollte. Die Lösung der Bellmann Gleichung.
-            desired_q ersetzt den Q-Wert der ausgeführten Aktion in current_q_values, um das Trainingsziel (y_train) zu bilden.
-            Die anderen Aktionswerte bleiben unverändert, weil für sie keine neuen Informationen vorliegen.
-            Denn die Rewards für die anderen Actions können wir nicht durch die Gleichung herausfinden, da wir die Wege nicht gegangen sind und somit
-            keine Werte für NextStates für diese Actions haben.
-            Die eigentliche Cost-Funktion findet in model.fit statt. Hier wird die current_q_values_list neu berechnet und als y_ist verwendet.'''
-            #Ziel qwerte sollen für die gemachte action den gewünschten reward ausgeben
-            current_q_values[action] = desired_q
-            x_train.append(current_state)
-            y_train.append(current_q_values)
-            '''In jedem Sample berechne ich den Q-Wert durch Prediction des States. Das sind die Rewards für jede Aktion, wenn ich mich danach
-             optimal verhalte. Ich habe auch den Reward für diesen State.  Ich hatte aber eine Erfahrung gemacht, indem mein Netz schon um dieses
-             Sample zu erstllen eine Prediction gemacht hat und dadurch einen Next State erhalten. Wenn ich wieder diesen Next State predicte und 
-             den größten Wert nehme, habe ich den Reward wenn ich nach dem State alles optimal gemacht hätte. Zusammen mit dem Reward habe ich alle
-             Komponenten für die Bellman Gleichung um damit mein y-gewollt zu bekommen. Mein Q-Wert des States ist dann mein Y_ist. 
-             
-             Mein Y_Gewollt basiert aber auf NextState, was auch schon eine Prediction war. Wenn ich beide Elemente der Loss Funktion mit dem 
-             selben Modell Predicte, ändern sich immer beide Werte und ich kann nie die Prediction des States an die Lösung der Bellmann-Gleichung(die
-             die Prediction des next States beinhaltet) konvergieren. Deshalb brauche ich ein extra Target Netz, dass nur seltener geupdatet wird.'''
-        x_train = numpy.array(x_train)
-        y_train = numpy.array(y_train)
-        x_train = numpy.reshape(x_train, [len(data_in_mini_batch), self.state_size])
-        y_train = numpy.reshape(y_train, [len(data_in_mini_batch), self.action_size])
+        
 
-        self.history = self.model.fit(
-            tensorflow.convert_to_tensor(x_train, tensorflow.float32),
-            tensorflow.convert_to_tensor(y_train, tensorflow.float32),
-            batch_size=self.batch_size, verbose=0
-        )
+        s_tf  = tensorflow.convert_to_tensor(s, dtype=tensorflow.float32)
+        s2_tf = tensorflow.convert_to_tensor(s2, dtype=tensorflow.float32)
+        a_tf  = tensorflow.convert_to_tensor(a, dtype=tensorflow.int32)
+        r_tf  = tensorflow.convert_to_tensor(r, dtype=tensorflow.float32)
+        d_tf  = tensorflow.convert_to_tensor(d, dtype=tensorflow.float32)
+        w_tf  = tensorflow.convert_to_tensor(w, dtype=tensorflow.float32)
+
+        q_next_online = self.model(s2_tf, training=False)
+        best_next_actions = tensorflow.argmax(q_next_online, axis=1, output_type=tensorflow.int32)
+
+        q_next_target_all = self.target_model(s2_tf, training=False)
+        idx = tensorflow.stack([tensorflow.range(self.batch_size, dtype=tensorflow.int32), best_next_actions], axis=1)
+        q_next_target = tensorflow.gather_nd(q_next_target_all, idx)
+
+        y = r_tf + self.discount_factor * (1.0 - d_tf) * q_next_target 
+
+        huber = tensorflow.keras.losses.Huber(delta=1.0, reduction=tensorflow.keras.losses.Reduction.NONE)
+
+        with tensorflow.GradientTape() as tape:
+            q_pred_all = self.model(s_tf, training=True)                             # (B, A)
+            idx2 = tensorflow.stack([tensorflow.range(self.batch_size, dtype=tensorflow.int32), a_tf], axis=1)
+            q_pred = tensorflow.gather_nd(q_pred_all, idx2)                          # (B,)
+            td_error = y - q_pred                                                    # (B,)
+            per_sample_loss = huber(y, q_pred)                                       # (B,)
+            weighted_loss = per_sample_loss * w_tf                                   
+            loss = tensorflow.reduce_mean(weighted_loss)
+
+        grads = tape.gradient(loss, self.model.trainable_variables)
+        #gradienten clipping ??????
+        grads = [tensorflow.clip_by_norm(g, 10.0) if g is not None else None for g in grads]
+        self.model.optimizer.apply_gradients(zip(grads, self.model.trainable_variables))
+
+        # Prioritäten mit |TD-Fehler| aktualisieren
+        td_np = numpy.abs(td_error.numpy())
+        self.per.update_priorities(idxs, td_np)
+
         self.target_update_after_counter += 1
 
+        # publish loss (optional wie bisher)
         if self.step_counter % 50 == 0:
-            msg=Float32MultiArray()
-            msg.data = [float(self.history.history['loss'][-1]), float(self.step_counter),float(self.epsilon)]
+            msg = Float32MultiArray()
+            msg.data = [float(loss.numpy()), float(self.step_counter), float(self.epsilon)]
             self.loss_pub.publish(msg)
 
+        # Target-Net-Update
         if self.target_update_after_counter > self.update_target_after and terminal:
             self.update_target_model()
+
 
 
 def main():
@@ -512,11 +768,15 @@ def main():
     # stage_boost = args[3]=='True' if len(args) > 3 else False
     rclpy.init()
 
+
     dqn_agent = DQNAgent()
     rclpy.spin(dqn_agent)
 
+
     dqn_agent.destroy_node()
     rclpy.shutdown()
+
+
 
 
 if __name__ == '__main__':

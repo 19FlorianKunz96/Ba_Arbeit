@@ -1,3 +1,5 @@
+'''Environment with Action Space 6'''
+
 import math
 import os
 
@@ -15,6 +17,7 @@ from std_srvs.srv import Empty
 
 from turtlebot3_msgs.srv import Dqn
 from turtlebot3_msgs.srv import Goal
+from copy import deepcopy
 #from sklearn.preprocessing import MinMaxScaler
 
 
@@ -30,12 +33,16 @@ class RLEnvironment(Node):
         self.robot_pose_x = 0.0
         self.robot_pose_y = 0.0
 
-        self.action_size = 5
+        self.action_size = 6
         self.max_step = 800
+        self.last_state = []
+        self.current_state = []
 
         self.done = False
         self.fail = False
         self.succeed = False
+        self.collission = False
+        self.timeout = False
 
         self.goal_angle = 0.0
         self.goal_distance = 1.0
@@ -232,6 +239,7 @@ class RLEnvironment(Node):
             self.get_logger().info('Collision happened')
             self.fail = True
             self.done = True
+            self.collission = True
             if ROS_DISTRO == 'humble':
                 self.cmd_vel_pub.publish(Twist())
             else:
@@ -243,6 +251,7 @@ class RLEnvironment(Node):
             self.get_logger().info('Time out!')
             self.fail = True
             self.done = True
+            self.timeout = True
             if ROS_DISTRO == 'humble':
                 self.cmd_vel_pub.publish(Twist())
             else:
@@ -287,14 +296,24 @@ class RLEnvironment(Node):
         reward = - (1.0 + 4.0 * weighted_decay)
 
         return reward
+    
+    def discretize_state(self, state, res=0.02):  # 2 cm Raster
+        return tuple(round(x / res) for x in state)
+
 
     def calculate_reward(self):
+       
+        if self.discretize_state(self.last_state) == self.discretize_state(self.current_state):
+            state_reward = -1
+        else:
+            state_reward = 0
+
         yaw_reward = 1 - (2 * abs(self.goal_angle) / math.pi)
         obstacle_reward = self.compute_weighted_obstacle_reward()
         
 
         print('directional_reward: %f, obstacle_reward: %f' % (yaw_reward, obstacle_reward))
-        reward = yaw_reward + obstacle_reward
+        reward = yaw_reward + obstacle_reward + state_reward
 
         if self.succeed:
             reward = 100.0
@@ -311,7 +330,7 @@ class RLEnvironment(Node):
             msg = Twist()
             if action == 5:
                 msg.linear.x = 0.0
-                msg.angulat.z = 0.0
+                msg.angular.z = 0.0
             else:
                 msg.linear.x = 0.2
                 msg.angular.z = self.angular_vel[action]
@@ -319,7 +338,7 @@ class RLEnvironment(Node):
             msg = TwistStamped()
             if action == 5:
                 msg.linear.x = 0.0
-                msg.angulat.z = 0.0
+                msg.angular.z = 0.0
             else:
                 msg.linear.x = 0.2
                 msg.angular.z = self.angular_vel[action]
@@ -332,14 +351,21 @@ class RLEnvironment(Node):
             self.destroy_timer(self.stop_cmd_vel_timer)
             self.stop_cmd_vel_timer = self.create_timer(0.8, self.timer_callback)
 
-        response.state = self.calculate_state()
+        self.current_state = self.calculate_state()
+        response.state = self.current_state
         response.reward = self.calculate_reward()
+        self.last_state=deepcopy(self.current_state)
         response.done = self.done
+        response.success = self.succeed
+        response.collission = self.collission
+        response.timeout = self.timeout
 
         if self.done is True:
             self.done = False
             self.succeed = False
             self.fail = False
+            self.collission = False
+            self.timeout = False
 
         return response
 

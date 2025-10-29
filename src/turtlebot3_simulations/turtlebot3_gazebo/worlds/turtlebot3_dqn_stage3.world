@@ -57,6 +57,6 @@
         <uri>model://turtlebot3_dqn_world/obstacles</uri>
       </include>
     </model>
-
+    
   </world>
 </sdf>
