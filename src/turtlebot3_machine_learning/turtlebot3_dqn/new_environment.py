@@ -166,6 +166,7 @@ class RLEnvironment(Node):
 #---------------------------------get the sensor data from gazebo----------------------------------------------------------------
     def scan_sub_callback(self, scan):
         self.scan_ranges = []
+        self.scan_angles = []
         self.front_ranges = []
         self.front_angles = []
 
@@ -185,6 +186,7 @@ class RLEnvironment(Node):
                 distance = 0.0
 
             self.scan_ranges.append(distance)
+            self.scan_angles.append(angle)
 
             if (0 <= angle <= math.pi/2) or (3*math.pi/2 <= angle <= 2*math.pi):
                 self.front_ranges.append(distance)
