@@ -50,6 +50,66 @@ from keras.saving import register_keras_serializable
 
 from turtlebot3_msgs.srv import Dqn
 
+class N_Step:
+    def __init__(self, capacity, n , gamma):
+        self.buffer = collections.deque(maxlen = capacity)
+        self.gamma = gamma
+        self.n = n
+
+    def reset(self):
+        self.buffer.clear()
+
+    def append(self, s, a, r, s2, done):
+        self.buffer.append((s,a,r,s2,done))
+
+    def can_pop(self):
+        return len(self.buffer) >= self.n
+    
+    def pop(self):
+        Rn = 0.0
+        discount = 1.0
+        done_out = False
+
+        s0, a0, _, _,_ = self.buffer[0]
+        for i in range(self.n):
+            _, _, r_i, _, d_i = self.buffer[i]
+            Rn += discount * r_i
+            if d_i:
+                done_out = True
+                s_n = self.buffer[i][3]
+                break
+            discount *= self.gamma
+
+        if not done_out:
+            s_n = self.buffer[self.n - 1][3]
+
+        self.buffer.popleft()
+        return s0, a0, Rn, s_n, done_out, discount
+    
+    def flush(self):
+        out = []
+        while self.buffer:
+            Rn= 0.0
+            discount = 1.0
+            done_out = False
+
+            s0, a0, _, _, _ =  self.buffer[0]
+            last_next = self.buffer[0][3]
+            for i in range(len(self.buffer)):
+                _, _, r_i, s_next_i, d_i = self.buffer[i]
+                Rn+= discount* r_i
+                last_next = s_next_i
+                if d_i:
+                    done_out = True
+                    break
+                discount *= self.gamma
+            self.buffer.popleft()
+            out.append((s0,a0,Rn,last_next, done_out, discount))
+        return out
+    
+
+
+
 class SumTree:
     def __init__(self, capacity: int):
         self.capacity = capacity
@@ -105,9 +165,9 @@ class PERBuffer:
         self.eps = eps
         self.max_p = 1.0  # neue Transitions sofort wichtig
 
-    def push(self, s, a, r, s2, done):
+    def push(self, s, a, Rn, s2, done, gamma):
         p = (self.max_p + self.eps) ** self.alpha
-        self.tree.add(p, (s, a, r, s2, done))
+        self.tree.add(p, (s, a, Rn, s2, done,gamma))
 
     def sample(self, batch_size):
 
@@ -285,23 +345,24 @@ class DQNAgent(Node):
         self.done = False
         self.succeed = False
         self.fail = False
-        self.info = ['Dueling,Double,Same Network Architecture, HuberLoss, PER, a->0.45,beta frames->150k, lr->0.0003, grad clipping, epsilon decay adjusted']
+        self.info = ['Dueling,Double,Same Network Architecture, HuberLoss, PER, reward more weighted obstacles epsilon decay adjusted']
 
 
         self.discount_factor = 0.99
-        self.learning_rate = 0.0003
+        self.learning_rate = 0.0007
         self.epsilon = 1.0
         self.step_counter = 0
         self.epsilon_decay = 30000 #6000 * self.stage
         self.epsilon_min = 0.05
         self.k=0.5 # for epsilon decay
         self.batch_size = 128
+        self.nsteps=5
 
-        #-----------------------------------PER-init----------------------------------------------------------------------------------
-        #self.replay_memory = collections.deque(maxlen=500000)
-        #self.min_replay_memory_size = 5000
+        #-----------------------------------PER + N-STEP INIT----------------------------------------------------------------------------------
+        self.nstep_memory = N_Step(500000,self.nsteps,self.discount_factor)
+        
 
-        self.per = PERBuffer(capacity=500000, alpha=0.45, beta_start=0.4, beta_frames=150_000, eps=1e-5)
+        self.per = PERBuffer(capacity=500000, alpha=0.6, beta_start=0.4, beta_frames=300_000, eps=1e-5)
         self.min_replay_memory_size = 5000
         #------------------------------------------------------------------------------------------------------------------------------
 
@@ -463,6 +524,7 @@ class DQNAgent(Node):
         for episode in range(self.load_episode + 1, self.max_training_episodes + 1):
             # if episode ==1:
             #     self.get_logger().info(f'Training with Stage Boost = {self.stage_boost}')
+            self.nstep_memory.reset()
             state = self.reset_environment()
             episode_num += 1
             local_step = 0
@@ -492,7 +554,6 @@ class DQNAgent(Node):
                 #.step() gibt die action weiter an environment, welches Werte berechnet, wieder zurückgibt und folgende Werte als return liefert
                 next_state, reward, done = self.step(action)
 
-
                 #score rechnet die rewards aus allen schrittenzusammen
                 score += reward
 
@@ -504,10 +565,19 @@ class DQNAgent(Node):
 
                 if self.train_mode:
                     #added den Schritt als Sample in die EpisodenCollection
-                    self.append_sample((state, action, reward, next_state, done))
+                    self.nstep_memory.append(state.squeeze(0),action,reward,next_state.squeeze(0),done)
+
+                    if self.nstep_memory.can_pop():
+                        s0, a0, Rn, s_n, done_n, gamma_n = self.nstep_memory.pop()
+                        self.per.push(s0,a0,Rn,s_n,done_n, gamma_n)
+
+                    self.append_sample((state, action, reward, next_state, done,self.discount_factor))
+
+                    if done:
+                        for (s0, a0, Rn, s_n, done_n, gamma_n) in self.nstep_memory.flush():
+                            self.per.push(s0, a0, Rn, s_n, done_n, gamma_n)
 
 
-                    #
                     self.train_model(done)
 
 
@@ -515,6 +585,8 @@ class DQNAgent(Node):
 
 
                 if done:
+
+
                     avg_max_q = sum_max_q / local_step if local_step > 0 else 0.0
 
 
@@ -678,8 +750,8 @@ class DQNAgent(Node):
 
     #----------------------------------------------adjusted for PER------------------------------------------------------------------------------
     def append_sample(self, transition):
-        s,a,r,s2,d = transition
-        self.per.push(s.squeeze(0), a, r, s2.squeeze(0), d)
+        s,a,r,s2,d,g = transition
+        self.per.push(s.squeeze(0), a, r, s2.squeeze(0), d,g)
         #self.replay_memory.append(transition)
 
 
@@ -694,19 +766,26 @@ class DQNAgent(Node):
         except RuntimeError:
             return
         
-        batch = [b for b in batch if b is not None and all(x is not None for x in b)]
-        if len(batch) == 0:
+        filtered = []
+        for i, data in enumerate(batch):
+            if data is None or any(x is None for x in data):
+                continue
+            filtered.append((idxs[i], data, is_w[i]))
+        if not filtered:
             return
+
+        idxs, batch, is_w = map(list, zip(*filtered))
         
         B=len(batch)
 
-        s, a, r, s2, d = map(numpy.array, zip(*batch))
+        s, a, r, s2, d, gamma_n = map(numpy.array, zip(*batch))
         s = s.astype(numpy.float32)
         s2 = s2.astype(numpy.float32)
         a  = a.astype(numpy.int32)
         r  = r.astype(numpy.float32)
         d  = d.astype(numpy.float32)
         w  = numpy.asarray(is_w[:B], dtype = numpy.float32)
+        gamma_n = gamma_n.astype(numpy.float32)
 
         
 
@@ -716,21 +795,22 @@ class DQNAgent(Node):
         r_tf  = tensorflow.convert_to_tensor(r, dtype=tensorflow.float32)
         d_tf  = tensorflow.convert_to_tensor(d, dtype=tensorflow.float32)
         w_tf  = tensorflow.convert_to_tensor(w, dtype=tensorflow.float32)
+        gamma_n_tf = tensorflow.convert_to_tensor(gamma_n, dtype=tensorflow.float32)
 
         q_next_online = self.model(s2_tf, training=False)
         best_next_actions = tensorflow.argmax(q_next_online, axis=1, output_type=tensorflow.int32)
 
         q_next_target_all = self.target_model(s2_tf, training=False)
-        idx = tensorflow.stack([tensorflow.range(self.batch_size, dtype=tensorflow.int32), best_next_actions], axis=1)
+        idx = tensorflow.stack([tensorflow.range(B, dtype=tensorflow.int32), best_next_actions], axis=1)
         q_next_target = tensorflow.gather_nd(q_next_target_all, idx)
 
-        y = r_tf + self.discount_factor * (1.0 - d_tf) * q_next_target 
+        y = r_tf + (1.0 - d_tf) * (gamma_n_tf * q_next_target )
 
         huber = tensorflow.keras.losses.Huber(delta=1.0, reduction=tensorflow.keras.losses.Reduction.NONE)
 
         with tensorflow.GradientTape() as tape:
             q_pred_all = self.model(s_tf, training=True)                             # (B, A)
-            idx2 = tensorflow.stack([tensorflow.range(self.batch_size, dtype=tensorflow.int32), a_tf], axis=1)
+            idx2 = tensorflow.stack([tensorflow.range(B, dtype=tensorflow.int32), a_tf], axis=1)
             q_pred = tensorflow.gather_nd(q_pred_all, idx2)                          # (B,)
             td_error = y - q_pred                                                    # (B,)
             per_sample_loss = huber(y, q_pred)                                       # (B,)
@@ -738,8 +818,9 @@ class DQNAgent(Node):
             loss = tensorflow.reduce_mean(weighted_loss)
 
         grads = tape.gradient(loss, self.model.trainable_variables)
-        #gradienten clipping ??????
+        #Gradient Clipping
         grads = [tensorflow.clip_by_norm(g, 10.0) if g is not None else None for g in grads]
+
         self.model.optimizer.apply_gradients(zip(grads, self.model.trainable_variables))
 
         # Prioritäten mit |TD-Fehler| aktualisieren
