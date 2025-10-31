@@ -1,7 +1,8 @@
-'''Environment with Action Space 6'''
+'''Environment with State Space28, new Reward,..'''
 
 import math
 import os
+import time
 
 from geometry_msgs.msg import Twist
 from geometry_msgs.msg import TwistStamped
@@ -33,7 +34,7 @@ class RLEnvironment(Node):
         self.robot_pose_x = 0.0
         self.robot_pose_y = 0.0
 
-        self.action_size = 6
+        self.action_size = 5
         self.max_step = 800
         self.last_state = []
         self.current_state = []
@@ -48,9 +49,16 @@ class RLEnvironment(Node):
         self.goal_distance = 1.0
         self.init_goal_distance = 0.5
         self.scan_ranges = []
+        self.scan_angles = []
         self.front_ranges = []
         self.min_obstacle_distance = 10.0
         self.is_front_min_actual_front = False
+
+        self.call=0
+        self.last_call=0
+
+        self.max_world_distance = 5.657
+        self.last_distance = 1.0
 
         self.local_step = 0
         self.stop_cmd_vel_timer = None
@@ -131,8 +139,9 @@ class RLEnvironment(Node):
 
     def reset_environment_callback(self, request, response):
         state = self.calculate_state()
-        self.init_goal_distance = state[0]
+        self.init_goal_distance = state[25]
         self.prev_goal_distance = self.init_goal_distance
+        self.last_distance = self.init_goal_distance
         response.state = state
 
         return response
@@ -187,12 +196,16 @@ class RLEnvironment(Node):
 
             self.scan_ranges.append(distance)
             self.scan_angles.append(angle)
+            
 
             if (0 <= angle <= math.pi/2) or (3*math.pi/2 <= angle <= 2*math.pi):
                 self.front_ranges.append(distance)
                 self.front_angles.append(angle)
 
-        self.min_obstacle_distance = min(self.scan_ranges)
+        self.min_obstacle_distance_index = int(numpy.argmin(self.scan_ranges))
+        self.min_obstacle_angle = self.scan_angles[self.min_obstacle_distance_index]
+        self.min_obstacle_distance = self.scan_ranges[self.min_obstacle_distance_index]
+        
         self.front_min_obstacle_distance = min(self.front_ranges) if self.front_ranges else 10.0
 
     def odom_sub_callback(self, msg):
@@ -215,15 +228,19 @@ class RLEnvironment(Node):
             goal_angle += 2 * math.pi
 
         self.goal_distance = goal_distance
+        #self.goal_distance_prev=
         self.goal_angle = goal_angle
 
 #-------------------------------------------------calculate the state from sensor data------------------------------------------------------
     def calculate_state(self):
         state = []
-        state.append(float(self.goal_distance))
+        for n, var in enumerate(self.scan_ranges):
+            if n % 2 == 0:
+                state.append(float(var))
         state.append(float(self.goal_angle))
-        for var in self.front_ranges:
-            state.append(float(var))
+        state.append(float(self.goal_distance))
+        state.append(float(self.min_obstacle_distance))
+        state.append(float(self.min_obstacle_distance_index))
         self.local_step += 1
 
         if self.goal_distance < 0.20:
@@ -264,69 +281,47 @@ class RLEnvironment(Node):
         return state
     
 #------------------------------------------------reward functions----------------------------------------------------------------
-    def compute_directional_weights(self, relative_angles, max_weight=10.0):
-        power = 6
-        raw_weights = (numpy.cos(relative_angles))**power + 0.1
-        scaled_weights = raw_weights * (max_weight / numpy.max(raw_weights))
-        normalized_weights = scaled_weights / numpy.sum(scaled_weights)
-        return normalized_weights
-
-    def compute_weighted_obstacle_reward(self):
-        if not self.front_ranges or not self.front_angles:
-            return 0.0
-
-        front_ranges = numpy.array(self.front_ranges)
-        front_angles = numpy.array(self.front_angles)
-
-        valid_mask = front_ranges <= 0.5
-        if not numpy.any(valid_mask):
-            return 0.0
-
-        front_ranges = front_ranges[valid_mask]
-        front_angles = front_angles[valid_mask]
-
-        relative_angles = numpy.unwrap(front_angles)
-        relative_angles[relative_angles > numpy.pi] -= 2 * numpy.pi
-
-        weights = self.compute_directional_weights(relative_angles, max_weight=10.0)
-
-        safe_dists = numpy.clip(front_ranges - 0.25, 1e-2, 3.5)
-        decay = numpy.exp(-3.0 * safe_dists)
-
-        weighted_decay = numpy.dot(weights, decay)
-
-        reward = - (1.0 + 4.0 * weighted_decay)
-
-        return reward
+ 
     
     def discretize_state(self, state, res=0.02):  # 2 cm Raster
         return tuple(round(x / res) for x in state)
 
 
     def calculate_reward(self):
-       
-        if self.discretize_state(self.last_state) == self.discretize_state(self.current_state):
-            state_reward = -1
-        else:
-            state_reward = 0
+        
+        # if self.discretize_state(self.last_state) == self.discretize_state(self.current_state):
+        #     state_reward = -1
+        # else:
+        #     state_reward = 0.1
 
         yaw_reward = 1 - (2 * abs(self.goal_angle) / math.pi)
-        obstacle_reward = self.compute_weighted_obstacle_reward()
-        
+        raw_prog = self.last_distance - self.goal_distance
+        progress_reward = max(min(raw_prog / 0.006, 1.0), -1.0) 
+        self.last_distance =  self.goal_distance
+
+        if self.min_obstacle_distance <= 0.5:
+            obstacle_reward = -5
+        else:
+            obstacle_reward = 1
 
         print('directional_reward: %f, obstacle_reward: %f' % (yaw_reward, obstacle_reward))
-        reward = yaw_reward + obstacle_reward + state_reward
+        reward = yaw_reward + obstacle_reward  + 2*progress_reward
 
         if self.succeed:
-            reward = 100.0
+            reward = 1000.0
 
         elif self.fail:
-            reward = -50.0
+            reward = -500.0
 
         return reward
     
 #--------------------------------callbacks-----------------------------------------------------------------
     def rl_agent_interface_callback(self, request, response):
+        
+        # self.call= time.time()
+        # self.get_logger().info(f"RL service: {1/ (self.call-self.last_call)}Hz, local_step={self.local_step}")
+        # self.last_call=self.call
+
         action = request.action
         if ROS_DISTRO == 'humble':
             msg = Twist()

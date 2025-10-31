@@ -46,9 +46,76 @@ from tensorflow.keras.models import load_model
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.optimizers import Adam
 from keras.saving import register_keras_serializable
+from tensorflow.keras import initializers
+from tensorflow.keras.layers import Layer
 
 
 from turtlebot3_msgs.srv import Dqn
+
+@register_keras_serializable(package="Custom", name="NoisyDense")
+class NoisyDense(Layer):
+    def __init__(self, units, activation=None, sigma0=0.5, **kwargs):
+        super().__init__(**kwargs)
+        self.units = int(units)
+        self.activation = tensorflow.keras.activations.get(activation)
+        self.sigma0 = float(sigma0)
+
+    def build(self, input_shape):
+        in_features = int(input_shape[-1])
+        # Fortunato init
+        mu_range = 1.0 / math.sqrt(in_features)  # statt tensorflow.math.sqrt(...)
+        sigma_init = self.sigma0 / math.sqrt(in_features)
+        self.mu_w = self.add_weight(
+            name="mu_w",
+            shape=(in_features, self.units),
+            initializer=initializers.RandomUniform(minval=-mu_range, maxval=mu_range),
+            trainable=True,
+        )
+        self.mu_b = self.add_weight(
+            name="mu_b",
+            shape=(self.units,),
+            initializer=initializers.RandomUniform(minval=-mu_range, maxval=mu_range),
+            trainable=True,
+        )
+        self.sigma_w = self.add_weight(
+            name="sigma_w",
+            shape=(in_features, self.units),
+            initializer=initializers.Constant(sigma_init),
+            trainable=True,
+        )
+        self.sigma_b = self.add_weight(
+            name="sigma_b",
+            shape=(self.units,),
+            initializer=initializers.Constant(sigma_init),
+            trainable=True,
+        )
+        super().build(input_shape)
+
+    @staticmethod
+    def _f(x):
+        return tensorflow.sign(x) * tensorflow.sqrt(tensorflow.abs(x))
+
+    def call(self, inputs, training=None):
+        if training:
+            eps_in = tensorflow.random.normal((tensorflow.shape(inputs)[-1],))
+            eps_out = tensorflow.random.normal((self.units,))
+            f_in = self._f(eps_in)          # (in,)
+            f_out = self._f(eps_out)        # (out,)
+            noise_w = tensorflow.tensordot(f_in, f_out, axes=0)  # (in, out)
+            w = self.mu_w + self.sigma_w * noise_w
+            b = self.mu_b + self.sigma_b * f_out
+        else:
+            w = self.mu_w
+            b = self.mu_b
+
+        y = tensorflow.linalg.matmul(inputs, w) + b
+        return self.activation(y) if self.activation is not None else y
+
+    def get_config(self):
+        cfg = super().get_config()
+        cfg.update({"units": self.units, "activation": tensorflow.keras.activations.serialize(self.activation), "sigma0": self.sigma0})
+        return cfg
+    
 
 class N_Step:
     def __init__(self, capacity, n , gamma):
@@ -237,37 +304,48 @@ current_time = datetime.datetime.now().strftime('[%mm%dd-%H:%M]')
 
 @register_keras_serializable(package="Custom", name="Dueling_DQN")
 class Dueling_DQN(tensorflow.keras.Model):
-    def __init__(self,n_actions,fc1,fc2,fc3=None, **kwargs):
+    def __init__(self,n_actions,fc1,fc2,fc3=None,full_noisy = False, **kwargs):
         super(Dueling_DQN,self).__init__(**kwargs)
-        self.dense1=tensorflow.keras.layers.Dense(fc1,activation='relu')
-        self.dense2=tensorflow.keras.layers.Dense(fc2,activation='relu')
-        self.dense3=None
-        if fc3 is not None:
-            self.dense3=tensorflow.keras.layers.Dense(fc3,activation='relu')
-        self.A= tensorflow.keras.layers.Dense(n_actions,activation='linear')
-        self.V= tensorflow.keras.layers.Dense(1, activation = 'linear')
+        if full_noisy:
+            self.dense1=NoisyDense(fc1,activation='relu')
+            self.dense2=NoisyDense(fc2,activation='relu')
+            self.dense3=None
+            if fc3 is not None:
+                self.dense3=NoisyDense(fc3,activation='relu')
+
+        else:
+            self.dense1=tensorflow.keras.layers.Dense(fc1,activation='relu')
+            self.dense2=tensorflow.keras.layers.Dense(fc2,activation='relu')
+            self.dense3=None
+            if fc3 is not None:
+                self.dense3=tensorflow.keras.layers.Dense(fc3,activation='relu')
+
+        self.A= NoisyDense(n_actions,activation=None)
+        self.V= NoisyDense(1, activation = None)
         self.n_actions=int(n_actions)
         self.fc1 = int(fc1)
         self.fc2 = int(fc2)
         self.fc3 = None if fc3 is None else int(fc3)
 
 
-    def call(self,state):
-        x=self.dense1(state)
-        x=self.dense2(x)
+    def call(self,state,training = None):
+        x=self.dense1(state, training= training)
+        x=self.dense2(x, training = training)
         if self.dense3 is not None:
-            x=self.dense3(x)
-        V= self.V(x)
-        A=self.A(x)
+            x=self.dense3(x,training = training)
+        V= self.V(x,training = training)
+        A=self.A(x, training = training)
 
 
         Q= V + (A - tensorflow.math.reduce_mean(A, axis=1, keepdims=True))
         return Q
    
-    def advantage(self,state):
+    def advantage(self,state, training = None):
         x=self.dense1(state)
         x=self.dense2(x)
-        A= self.A(x)
+        if self.dense3 is not None:
+            x = self.dense3(x)
+        A= self.A(x, training = training)
         return A
     
     def get_config(self):
@@ -332,8 +410,7 @@ class DQNAgent(Node):
         self.declare_parameter('action_space',5)
         self.stage = self.get_parameter('stagex').get_parameter_value().integer_value
         self.train_mode = True
-        self.state_size = 26
-        #self.action_size = 5
+        self.state_size = 28 #adjusted for new environment
         self.action_size=self.get_parameter('action_space').get_parameter_value().integer_value
         self.max_training_episodes = self.get_parameter('max_episodes').get_parameter_value().integer_value
 
@@ -349,14 +426,17 @@ class DQNAgent(Node):
 
 
         self.discount_factor = 0.99
-        self.learning_rate = 0.0007
+        self.learning_rate = 0.001
         self.epsilon = 1.0
         self.step_counter = 0
         self.epsilon_decay = 30000 #6000 * self.stage
         self.epsilon_min = 0.05
         self.k=0.5 # for epsilon decay
-        self.batch_size = 128
+        self.batch_size = 64
         self.nsteps=5
+        self.tau = 0.005
+        self.use_soft_target = True
+        self.full_noisy_dense = True
 
         #-----------------------------------PER + N-STEP INIT----------------------------------------------------------------------------------
         self.nstep_memory = N_Step(500000,self.nsteps,self.discount_factor)
@@ -540,11 +620,11 @@ class DQNAgent(Node):
 
 
                 #berchnet die q-values für alle actions im aktuellen Schritt.
-                q_values = self.model.predict(state)
+                q_values = self.model(state, training = self.train_mode)
 
 
                 #schaut welcher der größte ist.Nur für den Graphen ??
-                sum_max_q += float(numpy.max(q_values))
+                sum_max_q += float(tensorflow.reduce_max(q_values).numpy())
 
 
                 #Sucht die Action mit größtem Reward durch Prediction und Argmax
@@ -684,20 +764,11 @@ class DQNAgent(Node):
     def get_action(self, state):
         if self.train_mode:
             self.step_counter += 1
-            #adjusted for different epsilon values(1.0-->self.epsilon)
-            self.epsilon = self.epsilon_min + (1.0 - self.epsilon_min) * math.exp(
-                -1.0 * self.k * self.step_counter / self.epsilon_decay)        
-            
-                      
-            lucky = random.random()
-            if lucky > (1 - self.epsilon):
-                result = random.randint(0, self.action_size - 1)
-            else:
-                result = numpy.argmax(self.model.predict(state))
+            q_values= self.model(state,training = True)
         else:
-            result = numpy.argmax(self.model.predict(state))
+            q_values= self.model(state,training = False)
 
-
+        result = int(tensorflow.argmax(q_values, axis = 1).numpy()[0])
         return result
 
 
@@ -728,25 +799,19 @@ class DQNAgent(Node):
 
         return next_state, reward, done
 
-
-    def create_qnetwork(self):
-        model = Sequential()
-        model.add(Input(shape=(self.state_size,)))
-        model.add(Dense(512, activation='relu'))
-        model.add(Dense(256, activation='relu'))
-        model.add(Dense(128, activation='relu'))
-        model.add(Dense(self.action_size, activation='linear'))
-        model.compile(loss=MeanSquaredError(), optimizer=Adam(learning_rate=self.learning_rate))
-        model.summary()
-
-
-        return model
-
-
     def update_target_model(self):
         self.target_model.set_weights(self.model.get_weights())
         self.target_update_after_counter = 0
         print('*Target model updated*')
+
+    def soft_update_target(self, tau=None):
+        if tau is None:
+            tau = self.tau
+        online_vars = self.model.trainable_variables
+        target_vars = self.target_model.trainable_variables
+        for ov, tv in zip(online_vars, target_vars):
+            tv.assign((1.0 - tau) * tv + tau * ov)
+
 
     #----------------------------------------------adjusted for PER------------------------------------------------------------------------------
     def append_sample(self, transition):
@@ -797,10 +862,10 @@ class DQNAgent(Node):
         w_tf  = tensorflow.convert_to_tensor(w, dtype=tensorflow.float32)
         gamma_n_tf = tensorflow.convert_to_tensor(gamma_n, dtype=tensorflow.float32)
 
-        q_next_online = self.model(s2_tf, training=False)
+        q_next_online = self.model(s2_tf, training=True)
         best_next_actions = tensorflow.argmax(q_next_online, axis=1, output_type=tensorflow.int32)
 
-        q_next_target_all = self.target_model(s2_tf, training=False)
+        q_next_target_all = self.target_model(s2_tf, training=True)
         idx = tensorflow.stack([tensorflow.range(B, dtype=tensorflow.int32), best_next_actions], axis=1)
         q_next_target = tensorflow.gather_nd(q_next_target_all, idx)
 
@@ -826,8 +891,13 @@ class DQNAgent(Node):
         # Prioritäten mit |TD-Fehler| aktualisieren
         td_np = numpy.abs(td_error.numpy())
         self.per.update_priorities(idxs, td_np)
+        if self.use_soft_target:
+            self.soft_update_target()
+        else:
 
-        self.target_update_after_counter += 1
+            self.target_update_after_counter += 1
+            if self.target_update_after_counter > self.update_target_after and terminal:
+                self.update_target_model()
 
         # publish loss (optional wie bisher)
         if self.step_counter % 50 == 0:
@@ -835,18 +905,9 @@ class DQNAgent(Node):
             msg.data = [float(loss.numpy()), float(self.step_counter), float(self.epsilon)]
             self.loss_pub.publish(msg)
 
-        # Target-Net-Update
-        if self.target_update_after_counter > self.update_target_after and terminal:
-            self.update_target_model()
-
-
 
 def main():
-    # if args is None:
-    #     args = sys.argv
-    # stage_num = int(args[1]) if len(args) > 1 else '1'
-    # max_training_episodes = int(args[2]) if len(args) > 2 else '1000'
-    # stage_boost = args[3]=='True' if len(args) > 3 else False
+
     rclpy.init()
 
 

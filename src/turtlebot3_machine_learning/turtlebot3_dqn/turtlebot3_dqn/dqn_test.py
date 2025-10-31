@@ -34,7 +34,8 @@ from tensorflow.keras.losses import MeanSquaredError
 from tensorflow.keras.models import load_model
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.optimizers import RMSprop
-from turtlebot3_dqn.rainbow_agent import Dueling_DQN
+#from turtlebot3_dqn.rainbow_agent import Dueling_DQN
+from turtlebot3_dqn.per_agent import Dueling_DQN, NoisyDense
 
 from turtlebot3_msgs.srv import Dqn
 import matplotlib.pyplot as plt
@@ -61,8 +62,9 @@ class DQNTest(Node):
         self.action_size = self.get_parameter('action_space').get_parameter_value().integer_value
         
         self.test_mode = True
+        self.rainbowmode=False
 
-        self.state_size = 26
+        self.state_size = 28
         #self.action_size = 5
 
         self.success_counter=0
@@ -98,12 +100,14 @@ class DQNTest(Node):
             )
 
         if self.load_from_folder.endswith('rainbow'):
-            self.model = Dueling_DQN(self.action_size,512,256,128)
-            #self.model.compile(loss=MeanSquaredError(), optimizer=RMSprop(learning_rate=0.00025))
-            _ = self.model(tensorflow.zeros((1, self.state_size),dtype=tensorflow.float32))
-            #loaded_model=load_model(model_path,custom_objects={'Dueling_DQN':dueling_factory}, compile=False)
-            self.model.load_weights(model_path)
-            #self.model.set_weights(loaded_model.get_weights())
+            self.rainbowmode=True
+            try:
+                self.model.load_model(model_path, compile = False, custom_objects={'Dueling_DQN':Dueling_DQN, 'NoisyDense':NoisyDense})
+            except Exception:
+                self.model = Dueling_DQN(self.action_size,512,256,128)
+                _ = self.model(tensorflow.zeros((1, self.state_size),dtype=tensorflow.float32))
+                self.model.load_weights(model_path)
+
 
         else:
             self.model = self.build_model()
@@ -135,9 +139,14 @@ class DQNTest(Node):
         return model
 
     def get_action(self, state):
-        state = numpy.asarray(state)
-        q_values = self.model.predict(state.reshape(1, -1), verbose=0)
-        return int(numpy.argmax(q_values[0]))
+        if self.rainbowmode:
+            s=numpy.asarray(state,dtype=numpy.float32).reshape(1,-1)
+            q=self.model(s,training=False).numpy()[0]
+            return int(numpy.argmax(q))
+        else:
+            state = numpy.asarray(state)
+            q_values = self.model.predict(state.reshape(1, -1), verbose=0)
+            return int(numpy.argmax(q_values[0]))
     
 
     def moving_average(self,data, window_size=10):
@@ -211,7 +220,7 @@ class DQNTest(Node):
                 else:
                     self.get_logger().error(f'Service call failure: {future.exception()}')
 
-                time.sleep(0.01)
+                time.sleep(0.2)#vorher 0.01, irgendwann wurde aber rl agent callback mit 60Hz aufgerufen-->schnelle Timeouts
 
             #Interactive Plot
             plot1.clear()

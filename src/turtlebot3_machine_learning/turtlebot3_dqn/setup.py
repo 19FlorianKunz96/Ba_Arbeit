@@ -39,6 +39,7 @@ setup(
             'per_agent = turtlebot3_dqn.per_agent:main',
             'dqn_environment = turtlebot3_dqn.dqn_environment:main',
             'custom_environment = turtlebot3_dqn.custom_environment:main',
+            'new_environment = turtlebot3_dqn.new_environment:main',
             'dqn_gazebo = turtlebot3_dqn.dqn_gazebo:main',
             'dqn_test = turtlebot3_dqn.dqn_test:main',
             'result_graph = turtlebot3_dqn.result_graph:main',

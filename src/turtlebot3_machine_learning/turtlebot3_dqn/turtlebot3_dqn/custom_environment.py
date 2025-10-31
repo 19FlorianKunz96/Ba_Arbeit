@@ -263,7 +263,7 @@ class RLEnvironment(Node):
     
 #------------------------------------------------reward functions----------------------------------------------------------------
     def compute_directional_weights(self, relative_angles, max_weight=10.0):
-        power = 6
+        power = 10
         raw_weights = (numpy.cos(relative_angles))**power + 0.1
         scaled_weights = raw_weights * (max_weight / numpy.max(raw_weights))
         normalized_weights = scaled_weights / numpy.sum(scaled_weights)
@@ -293,7 +293,7 @@ class RLEnvironment(Node):
 
         weighted_decay = numpy.dot(weights, decay)
 
-        reward = - (1.0 + 4.0 * weighted_decay)
+        reward = - (1.0 + 8.0 * weighted_decay)
 
         return reward
     
@@ -316,10 +316,10 @@ class RLEnvironment(Node):
         reward = yaw_reward + obstacle_reward + state_reward
 
         if self.succeed:
-            reward = 100.0
+            reward = 1000.0
 
         elif self.fail:
-            reward = -50.0
+            reward = -500.0
 
         return reward
     

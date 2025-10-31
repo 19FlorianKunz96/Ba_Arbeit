@@ -1,3 +1,6 @@
+'''Double Network / Dueling Network / Action Space 6 / Prioritized Experience Replay'''
+
+
 from launch import LaunchDescription
 from launch.actions import IncludeLaunchDescription
 from launch.substitutions import PathJoinSubstitution
@@ -12,7 +15,7 @@ from launch.substitutions import PythonExpression
 import os
 from ament_index_python.packages import get_package_share_directory
 
-'''Launch File for Testing Agents with Action Space 5'''
+
 
 def generate_launch_description():
 
@@ -31,7 +34,7 @@ def generate_launch_description():
     load_from_folder_arg = DeclareLaunchArgument('load_from_folder', default_value = 'actual', description = 'plug in foldername for training on older data')
     load_from_stage_arg=DeclareLaunchArgument('load_from_stage', default_value='1',description='plug in start of training stage')
     load_from_episode_arg = DeclareLaunchArgument('load_from_episode', default_value = '50', description = 'plug in start of training episode')
-    action_space_arg = DeclareLaunchArgument('action_space', default_value = '5', description = 'number of possible actions')
+    action_space_arg = DeclareLaunchArgument('action_space', default_value = '6', description = 'number of possible actions')
     ld.add_action(stage_arg)
     ld.add_action(max_episodes_arg)
     ld.add_action(stage_boost_arg)
@@ -43,6 +46,7 @@ def generate_launch_description():
     #To be set in command line --> stage:=n
     stage = LaunchConfiguration('stagex')
     max_episodes = LaunchConfiguration('max_episodes')
+    stage_boost= LaunchConfiguration('stage_boost')
     load_from_folder=LaunchConfiguration('load_from_folder')
     load_from_stage=LaunchConfiguration('load_from_stage')
     load_from_episode= LaunchConfiguration('load_from_episode')
@@ -67,16 +71,19 @@ def generate_launch_description():
 
     #----------------------------------------Nodes---------------------------------------------------------------------------
     node1= Node(package = 'turtlebot3_dqn',executable = 'dqn_gazebo',name = 'LocationGoalInit',output = 'screen',parameters=[{'stagex':stage}],)
-    node2= Node(package = 'turtlebot3_dqn',executable = 'new_environment',name ='Environmet',output = 'screen')
-    node3= Node(package = 'turtlebot3_dqn',executable='dqn_test',name='Agent',output = 'screen',parameters=[{'stagex':stage,
+    node2= Node(package = 'turtlebot3_dqn',executable = 'new_environment',name ='Environmet',output = 'screen',)
+    node3= Node(package = 'turtlebot3_dqn',executable='per_agent',name='Agent',output = 'screen',parameters=[{'stagex':stage,
                                                                                                               'max_episodes':max_episodes,
+                                                                                                              'stage_boost':stage_boost,
                                                                                                               'load_from_folder':load_from_folder,
                                                                                                               'load_from_stage' : load_from_stage,
                                                                                                               'load_from_episode' : load_from_episode,
-                                                                                                              'action_space' : action_space}],)
+                                                                                                              'action_space':action_space}],)
+    node4= Node(package = 'turtlebot3_dqn',executable='action_graph',name='ActionGraph',output = 'screen',)
+    node5= Node(package = 'turtlebot3_dqn',executable='result_graph',name='ResultGraph',output = 'screen',)
+    node6= Node(package = 'turtlebot3_dqn',executable='loss_graph',name='LossGraph',output = 'screen',)
 
-
-    node_list=[node1,node2,node3]
+    node_list=[node1,node2,node3,node4,node5,node6]
     for node in node_list:
         ld.add_action(node)
 
