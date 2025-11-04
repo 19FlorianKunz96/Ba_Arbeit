@@ -287,32 +287,42 @@ class RLEnvironment(Node):
         return tuple(round(x / res) for x in state)
 
 
-    def calculate_reward(self):
+    def calculate_reward(self,action):
         
         # if self.discretize_state(self.last_state) == self.discretize_state(self.current_state):
         #     state_reward = -1
         # else:
         #     state_reward = 0.1
 
-        yaw_reward = 1 - (2 * abs(self.goal_angle) / math.pi)
-        raw_prog = self.last_distance - self.goal_distance
-        progress_reward = max(min(raw_prog / 0.006, 1.0), -1.0) 
-        self.last_distance =  self.goal_distance
+        #yaw_reward = 1 - (2 * abs(self.goal_angle) / math.pi)
+        # progress = self.last_distance - self.goal_distance
+        #progress_reward = max(min(raw_prog / 0.006, 1.0), -1.0) 
+        # self.last_distance =  self.goal_distance
+
+        '''yaw_reward wie im repo'''
+        yaw_rewards = []
+        for i in range(5):
+            angle = -math.pi/4 + self.goal_angle + (math.pi/8 * i) + math.pi/2
+            tr = 1 - 4 * abs(0.5 - math.modf(0.25 + 0.5 * (angle % (2 * math.pi)) / math.pi)[0])
+            yaw_rewards.append(tr)
+        yaw_reward = yaw_rewards[action]
+
+        progress_rate = 2** (self.goal_distance/self.init_goal_distance)
 
         if self.min_obstacle_distance <= 0.5:
-            obstacle_reward = -5
+            obstacle_reward = -5.0
         else:
-            obstacle_reward = 1
+            obstacle_reward = 1.0
 
-        print('directional_reward: %f, obstacle_reward: %f' % (yaw_reward, obstacle_reward))
-        reward = yaw_reward + obstacle_reward  + 2*progress_reward
+        reward = ((round(yaw_reward * 5, 2)) * progress_rate) + obstacle_reward
+        #reward = (yaw_reward * progress_rate) + obstacle_reward
 
         if self.succeed:
             reward = 1000.0
 
         elif self.fail:
             reward = -500.0
-
+        print('reward: %f' % (reward))
         return reward
     
 #--------------------------------callbacks-----------------------------------------------------------------
@@ -350,7 +360,7 @@ class RLEnvironment(Node):
 
         self.current_state = self.calculate_state()
         response.state = self.current_state
-        response.reward = self.calculate_reward()
+        response.reward = self.calculate_reward(action=action)
         self.last_state=deepcopy(self.current_state)
         response.done = self.done
         response.success = self.succeed

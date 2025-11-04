@@ -64,6 +64,8 @@ class DQNTest(Node):
         self.test_mode = True
         self.rainbowmode=False
 
+        self.full_noisy_dense = True
+
         self.state_size = 28
         #self.action_size = 5
 
@@ -104,7 +106,7 @@ class DQNTest(Node):
             try:
                 self.model.load_model(model_path, compile = False, custom_objects={'Dueling_DQN':Dueling_DQN, 'NoisyDense':NoisyDense})
             except Exception:
-                self.model = Dueling_DQN(self.action_size,512,256,128)
+                self.model = Dueling_DQN(self.action_size,fc1=256,fc2=256, full_noisy = self.full_noisy_dense)
                 _ = self.model(tensorflow.zeros((1, self.state_size),dtype=tensorflow.float32))
                 self.model.load_weights(model_path)
 

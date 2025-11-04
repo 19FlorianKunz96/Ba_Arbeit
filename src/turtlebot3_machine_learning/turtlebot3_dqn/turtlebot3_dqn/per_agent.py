@@ -341,10 +341,10 @@ class Dueling_DQN(tensorflow.keras.Model):
         return Q
    
     def advantage(self,state, training = None):
-        x=self.dense1(state)
-        x=self.dense2(x)
+        x=self.dense1(state, training = training)
+        x=self.dense2(x, training = training)
         if self.dense3 is not None:
-            x = self.dense3(x)
+            x = self.dense3(x, training = training)
         A= self.A(x, training = training)
         return A
     
@@ -422,7 +422,7 @@ class DQNAgent(Node):
         self.done = False
         self.succeed = False
         self.fail = False
-        self.info = ['Dueling,Double,Same Network Architecture, HuberLoss, PER, reward more weighted obstacles epsilon decay adjusted']
+        self.info = ['Dueling,Double, HuberLoss, PER, n_step,NoisyNets in allen Layern, 256-256, action space 5, soft target update, gradient clipping, reward funktion komplett aus repo übernommen, target netz nicht trainable']
 
 
         self.discount_factor = 0.99
@@ -459,8 +459,8 @@ class DQNAgent(Node):
 
         #self.model = self.create_qnetwork()
         #self.target_model = self.create_qnetwork()
-        self.model = Dueling_DQN(self.action_size,512,256,128)
-        self.target_model = Dueling_DQN(self.action_size,512,256,128)
+        self.model = Dueling_DQN(self.action_size,fc1=256,fc2=256, full_noisy = self.full_noisy_dense)
+        self.target_model = Dueling_DQN(self.action_size,fc1=256,fc2=256, full_noisy = self.full_noisy_dense)
         loss = tensorflow.keras.losses.Huber(delta=1.0, name="huber")
         self.model.compile(loss=loss, optimizer=Adam(learning_rate=self.learning_rate))
         _ = self.model(tensorflow.zeros((1, self.state_size)))
@@ -862,10 +862,10 @@ class DQNAgent(Node):
         w_tf  = tensorflow.convert_to_tensor(w, dtype=tensorflow.float32)
         gamma_n_tf = tensorflow.convert_to_tensor(gamma_n, dtype=tensorflow.float32)
 
-        q_next_online = self.model(s2_tf, training=True)
+        q_next_online = self.model(s2_tf, training=False)
         best_next_actions = tensorflow.argmax(q_next_online, axis=1, output_type=tensorflow.int32)
 
-        q_next_target_all = self.target_model(s2_tf, training=True)
+        q_next_target_all = self.target_model(s2_tf, training=False)
         idx = tensorflow.stack([tensorflow.range(B, dtype=tensorflow.int32), best_next_actions], axis=1)
         q_next_target = tensorflow.gather_nd(q_next_target_all, idx)
 
