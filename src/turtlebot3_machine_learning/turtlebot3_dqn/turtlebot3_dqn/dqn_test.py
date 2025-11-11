@@ -34,8 +34,7 @@ from tensorflow.keras.losses import MeanSquaredError
 from tensorflow.keras.models import load_model
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.optimizers import RMSprop
-#from turtlebot3_dqn.rainbow_agent import Dueling_DQN
-from turtlebot3_dqn.per_agent import Dueling_DQN, NoisyDense
+from turtlebot3_dqn.utils import Dueling_DQN, NoisyDense, DuelingQRDQN
 
 from turtlebot3_msgs.srv import Dqn
 import matplotlib.pyplot as plt
@@ -63,10 +62,12 @@ class DQNTest(Node):
         
         self.test_mode = True
         self.rainbowmode=False
+        self.distributional_mode=True
 
         self.full_noisy_dense = True
 
         self.state_size = 28
+        self.num_quantiles=51
         #self.action_size = 5
 
         self.success_counter=0
@@ -100,8 +101,16 @@ class DQNTest(Node):
                 fc2=256,
                 fc3=128
             )
+        if self.load_from_folder.endswith('rainbow') and self.distributional_mode:
+            self.rainbowmode = True
+            try:
+                self.model.load_model(model_path, compile=False, custom_objects = {'Dueling_QR:DQN':DuelingQRDQN, 'NoisyDense':NoisyDense})
+            except Exception:
+                self.model= DuelingQRDQN(n_actions=self.action_size,fc1=256,fc2=256,num_quantiles=self.num_quantiles,full_noisy=self.full_noisy_dense)
+                _ = self.model(tensorflow.zeros((1,self.state_size),dtype=tensorflow.float32))
+                self.model.load_weights(model_path)
 
-        if self.load_from_folder.endswith('rainbow'):
+        elif self.load_from_folder.endswith('rainbow'):
             self.rainbowmode=True
             try:
                 self.model.load_model(model_path, compile = False, custom_objects={'Dueling_DQN':Dueling_DQN, 'NoisyDense':NoisyDense})
@@ -117,8 +126,9 @@ class DQNTest(Node):
             self.model.set_weights(loaded_model.get_weights())
             
 #-------------------------------------------Messages----------------------------------------------------------------------------------------
+        #clients
         self.rl_agent_interface_client = self.create_client(Dqn, 'rl_agent_interface')
-
+        #publisher
         self.action_pub = self.create_publisher(Float32MultiArray, '/get_action', 10)
         self.result_pub = self.create_publisher(Float32MultiArray, 'result', 10)
         self.loss_pub = self.create_publisher(Float32MultiArray,'loss',10)
@@ -141,7 +151,12 @@ class DQNTest(Node):
         return model
 
     def get_action(self, state):
-        if self.rainbowmode:
+        if self.rainbowmode and self.distributional_mode:
+            s=numpy.asarray(state,dtype=numpy.float32).reshape(1,-1)
+            q_exp = self.model.q_expectation(s, training = False)
+            return int(tensorflow.argmax(q_exp,axis=1).numpy()[0])
+
+        elif self.rainbowmode:
             s=numpy.asarray(state,dtype=numpy.float32).reshape(1,-1)
             q=self.model(s,training=False).numpy()[0]
             return int(numpy.argmax(q))
