@@ -1,0 +1,7 @@
+<library path="rl_controller">
+  <class
+    name="nav2_rl/RLController"
+    type="nav2_rl::RLController"
+    base_class_type="nav2_core::Controller"
+    description="RL proxy controller calling Python agent via service"/>
+</library>

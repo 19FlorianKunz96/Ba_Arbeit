@@ -1,0 +1,26 @@
+<root main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+
+    <!-- Einmalig global planen und dem Pfad folgen -->
+    <RecoveryNode name="NavigateOnce" number_of_retries="2">
+
+      <!-- Hauptnavigation: einmal planen, dann RL-Controller -->
+      <Sequence name="ComputeAndFollow">
+        <ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased"/>
+        <FollowPath path="{path}" controller_id="RL"/>
+      </Sequence>
+
+      <!-- Recovery/Aufräumen wenn FollowPath FAIL zurückgibt -->
+      <Sequence name="OnFailureCleanup">
+        <ClearEntireCostmap name="ClearLocalCostmap"
+                            service_name="local_costmap/clear_entirely_local_costmap"/>
+        <ClearEntireCostmap name="ClearGlobalCostmap"
+                            service_name="global_costmap/clear_entirely_global_costmap"/>
+        <!-- Optional kleine Pause -->
+        <!-- <Wait wait_duration="2"/> -->
+      </Sequence>
+
+    </RecoveryNode>
+  </BehaviorTree>
+</root>
+

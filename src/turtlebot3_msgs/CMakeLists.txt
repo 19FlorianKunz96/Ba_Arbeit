@@ -20,6 +20,7 @@ find_package(ament_cmake REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(rosidl_default_generators REQUIRED)
 
 ################################################################################
 # Setup for python modules and scripts
@@ -32,17 +33,21 @@ set(msg_files
   "msg/SensorState.msg"
   "msg/Sound.msg"
   "msg/VersionInfo.msg"
+  "msg/GoalState.msg"
+  
 )
 
 set(srv_files
   "srv/Sound.srv"
   "srv/Dqn.srv"
   "srv/Goal.srv"
+  "srv/RLLocalPath.srv"
 )
 
 set(action_files
   "action/Patrol.action"
 )
+
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   ${msg_files}

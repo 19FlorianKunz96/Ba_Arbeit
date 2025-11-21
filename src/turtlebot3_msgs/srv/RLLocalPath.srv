@@ -1,0 +1,13 @@
+# Request
+builtin_interfaces/Time stamp
+float32 max_vx
+float32 max_wz
+# optional: horizon_s, debug flags …
+---
+# Response
+float32 vx
+float32 vy
+float32 wz
+builtin_interfaces/Time action_stamp
+bool ok
+string msg
