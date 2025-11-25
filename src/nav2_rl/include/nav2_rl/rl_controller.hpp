@@ -63,18 +63,15 @@ private:
   rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr local_goal_pub_;
   geometry_msgs::msg::PoseStamped last_published_goal_;
 
+  rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr global_path_pub;
+
   // Param-Callback
   rclcpp_lifecycle::LifecycleNode::OnSetParametersCallbackHandle::SharedPtr param_cb_handle_;
 
   // Helper (Deklaration)
   void connectClient_();
-  geometry_msgs::msg::PoseStamped robotPoseInMap_();
-  static double dist2_(const geometry_msgs::msg::Point & a, const geometry_msgs::msg::Point & b);
-  static int nearestIndexTo_(const std::vector<geometry_msgs::msg::PoseStamped> & poses,
-                             const geometry_msgs::msg::Point & p);
-  static int indexAtLookaheadFrom_(const std::vector<geometry_msgs::msg::PoseStamped> & poses,
-                                   int start_idx, double L);
-  void maybeAdvanceLocalGoal_();
+   geometry_msgs::msg::PoseStamped robotPoseInMap_();
+
 };
 
 } // namespace nav2_rl

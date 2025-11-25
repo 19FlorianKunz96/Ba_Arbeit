@@ -8,7 +8,7 @@ import math
 import rclpy, numpy as np
 from rclpy.node import Node
 from sensor_msgs.msg import LaserScan
-from nav_msgs.msg import Odometry, Path as RosPath
+from nav_msgs.msg import Odometry, Path
 from turtlebot3_msgs.srv import RLLocalPath
 from geometry_msgs.msg import PoseStamped
 from turtlebot3_msgs.msg import GoalState
@@ -24,6 +24,7 @@ from turtlebot3_dqn.utils import N_Step
 from turtlebot3_dqn.utils import NoisyDense
 from turtlebot3_dqn.utils import DuelingQRDQN
 from turtlebot3_dqn.utils import quantile_huber_loss
+from turtlebot3_dqn.utils import euler_from_quaternion
 
 #----------------------------------------------------------------------------------------------------------------------------------------------#
 #                                                              Load Tensorflow
@@ -57,13 +58,15 @@ class DQNadvisor(Node):
 
         self.sub_scan = self.create_subscription(LaserScan, '/scan', self.on_scan, 10)
         self.sub_odom = self.create_subscription(Odometry, '/odom', self.on_odom, 10)
-        self.sub_path = self.create_subscription(RosPath, '/rl/target_path', self.on_path, 1)
-        self.sub_lgoal = self.create_subscription(PoseStamped,'/rl/local_goal', self.on_local_goal,1)
+        self.sub_path = self.create_subscription(Path, '/rl/target_path', self.on_path, 1)
+
+        self.pub_goal = self.create_publisher(GoalState, 'goal', 10)
+       
+        #self.goal_pub = self.create_publisher(GoalState, '/debug',10)
 
         srv_name = self.get_parameter('service_name').value
         self.srv = self.create_service(RLLocalPath, srv_name, self.on_service_handle)
 
-        self.local_goal=None
         self.angular_vel = [1.5, 0.75, 0.0, -0.75, -1.5]
 
         self.scan_ranges = []
@@ -73,9 +76,13 @@ class DQNadvisor(Node):
         self.local_goal = None
         self.robot_pose_x = self.robot_pose_y = 0.0
         self.goal_angle = 0.0
-        self.goal_distance = 0.0
+        self.goal_distance = 1.0
         self.min_obstacle_distance = 10.0
         self.min_obstacle_distance_index = 0
+        self.global_path = []
+        self.last_index=0
+        self.done=True
+        self.reached = False
         #----------------------------------------------------------------------------------------------------------------------------------------------#
         #                                                         Get the Model
         #----------------------------------------------------------------------------------------------------------------------------------------------#
@@ -106,8 +113,9 @@ class DQNadvisor(Node):
             loaded_model = load_model(self.model_path, compile=False, custom_objects={'mse': MeanSquaredError()})
             self.model.set_weights(loaded_model.get_weights())
 
-    def on_local_goal(self, msg:PoseStamped):
-        self.local_goal = (msg.pose.position.x, msg.pose.position.y)
+        #----------------------------------------------------------------------------------------------------------------------------------------------#
+        #                                                         Functions
+        #----------------------------------------------------------------------------------------------------------------------------------------------#
 
     def on_scan(self, msg:LaserScan):
         self.scan_ranges = []
@@ -145,13 +153,21 @@ class DQNadvisor(Node):
         self.front_min_obstacle_distance = min(self.front_ranges) if self.front_ranges else 10.0
 
     def on_odom(self, msg: Odometry):
-        if self.local_goal is None:
-            return
         self.robot_pose_x = msg.pose.pose.position.x
         self.robot_pose_y = msg.pose.pose.position.y
-        self.goal_pose_x,self.goal_pose_y=self.local_goal
-        _, _, self.robot_pose_theta = self.euler_from_quaternion(msg.pose.pose.orientation)
+        _, _, self.robot_pose_theta = euler_from_quaternion(msg.pose.pose.orientation)
 
+        if not self.global_path or self.reached:
+            return
+        
+        if self.local_goal is None and self.done:
+            self.sub_target()
+            if self.local_goal is None:
+                return
+
+        if self.local_goal is None:
+            return
+        self.goal_pose_x, self.goal_pose_y = self.local_goal
         goal_distance = math.sqrt(
             (self.goal_pose_x - self.robot_pose_x) ** 2
             + (self.goal_pose_y - self.robot_pose_y) ** 2)
@@ -167,11 +183,62 @@ class DQNadvisor(Node):
             goal_angle += 2 * math.pi
 
         self.goal_distance = goal_distance
-        #self.goal_distance_prev=
         self.goal_angle = goal_angle
 
-    def on_path(self, msg:RosPath):
-        pass
+        if goal_distance < 0.3:
+            if self.last_index == len(self.global_path) - 1:
+                if not self.reached:
+                    msg_goal = GoalState()
+                    msg_goal.pose_x, msg_goal.pose_y = self.local_goal
+                    msg_goal.success = True 
+                    self.pub_goal.publish(msg_goal)
+                    self.reached = True
+                else:
+                    self.done= True
+                    self.sub_target()
+
+
+
+    def on_path(self, msg:Path):
+        self.global_path = msg.poses
+        self.last_index = 0
+
+    def sub_target(self):
+        msg = GoalState()
+        if not self.global_path or self.reached:
+            return
+        
+        if self.done or self.local_goal is None:
+            chosen = False
+            for n in range(self.last_index, len(self.global_path)):
+                path = self.global_path[n]
+                x = round(float(path.pose.position.x),1)
+                y = round(float(path.pose.position.y),1)
+                distance =  math.hypot(x-self.robot_pose_x,y-self.robot_pose_y)
+                
+
+                if distance > 0.5:
+                    self.local_goal = (x,y)
+                    self.last_index = n
+                    self.done = False
+                    chosen = True
+
+                    msg.pose_x = x
+                    msg.pose_y = y
+                    msg.success = self.done
+                    self.pub_goal.publish(msg)
+                    break
+            
+            if not chosen:
+                last = self.global_path[-1].pose.position
+                self.local_goal = (round(float(last.x),1), (round(float(last.y),1)))
+                self.last_index = len(self.global_path) - 1
+                self.done = False
+
+                msg.pose_x,msg.pose_y = self.local_goal
+                msg.success=self.done
+                self.pub_goal.publish(msg)
+
 
     def build_state(self):
         state = []
@@ -184,24 +251,7 @@ class DQNadvisor(Node):
         state.append(float(self.min_obstacle_distance_index))
         return state
     
-    def euler_from_quaternion(self, quat):
-        x = quat.x
-        y = quat.y
-        z = quat.z
-        w = quat.w
 
-        sinr_cosp = 2 * (w * x + y * z)
-        cosr_cosp = 1 - 2 * (x * x + y * y)
-        roll = np.arctan2(sinr_cosp, cosr_cosp)
-
-        sinp = 2 * (w * y - z * x)
-        pitch = np.arcsin(sinp)
-
-        siny_cosp = 2 * (w * z + x * y)
-        cosy_cosp = 1 - 2 * (y * y + z * z)
-        yaw = np.arctan2(siny_cosp, cosy_cosp)
-
-        return roll, pitch, yaw
     
     def advise(self):
         state = self.build_state()

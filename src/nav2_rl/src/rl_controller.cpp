@@ -5,7 +5,7 @@
 using namespace std::chrono_literals;
 
 namespace nav2_rl {
-
+// Soll nur noch globalen pfad schicken und kommandos als service anfordern, rest im agenten node
 void RLController::configure(
   const rclcpp_lifecycle::LifecycleNode::WeakPtr & parent,
   std::string name,
@@ -28,7 +28,6 @@ void RLController::configure(
 
   // Publisher für lokales Ziel
   rclcpp::QoS qos(1); qos.transient_local().reliable();
-  local_goal_pub_ = node_->create_publisher<geometry_msgs::msg::PoseStamped>("/rl/local_goal", qos);
   global_path_pub = node_->create_publisher<nav_msgs::msg::Path>("/rl/target_path", qos);
 
   connectClient_();
@@ -50,7 +49,7 @@ void RLController::connectClient_() {
   client_ = node_->create_client<turtlebot3_msgs::srv::RLLocalPath>(agent_service_);
 }
 
-//liefert die geschätzte Pose des Roboters im map-Frame. Wenn das TF nicht klappt, bekommst du eine Pose im Base-Frame als Notlösung.
+//Globalen Pfad erhalten(beim Setzen des Ziels oder beim Replanning) und an Agenten Node schicken. Weitere Berechnung der Teilpfade dort.
 geometry_msgs::msg::PoseStamped RLController::robotPoseInMap_() {
   geometry_msgs::msg::PoseStamped base, map;
   base.header.frame_id = costmap_ros_->getBaseFrameID();
@@ -65,118 +64,36 @@ geometry_msgs::msg::PoseStamped RLController::robotPoseInMap_() {
   }
   return map;
 }
-
-//euklidische Distanz zwischen zwei Punkten
-double RLController::dist2_(const geometry_msgs::msg::Point & a, const geometry_msgs::msg::Point & b) {
-  return std::hypot(a.x - b.x, a.y - b.y);
-}
-
-//Findet den Index der Pose im Pfad, die am nächsten zum gegebenen Punkt p liegt (z.B. der Roboterposition).
-int RLController::nearestIndexTo_(const std::vector<geometry_msgs::msg::PoseStamped> & poses,
-                                  const geometry_msgs::msg::Point & p) {
-  int best = 0; double best_d = 1e9;
-  for (int i = 0; i < static_cast<int>(poses.size()); ++i) {
-    double d = dist2_(poses[i].pose.position, p);
-    if (d < best_d) { best_d = d; best = i; }
-  }
-  return best;
-}
-
-//Gibt den Index auf dem Pfad zurück, der in etwa L Meter vor start_idx liegt, ansonsten das Pfadende.
-int RLController::indexAtLookaheadFrom_(const std::vector<geometry_msgs::msg::PoseStamped> & poses,int start_idx, double L)
-{
-  if (poses.empty()) return 0;
-  double acc = 0.0;
-  for (int i = start_idx; i < static_cast<int>(poses.size()) - 1; ++i) {
-    acc += dist2_(poses[i+1].pose.position, poses[i].pose.position);
-    if (acc >= L) return i + 1;
-  }
-  return static_cast<int>(poses.size()) - 1;
-}
-
-
-// Was bekommt dein Controller also konkret als path?
-// Er bekommt:
-
-// ✔ Eine geordnete Liste von Posen
-// wie der Roboter laufen soll — typischerweise vom global planner erzeugt.
-
-// ✔ Typischerweise im frame "map"
-// weil globale Pfade meist in der Karte geplant werden.
-
-// ✔ Jede Pose mit Zeitstempel + Pose-Daten
-
-//Der aktuell verfolgte globale Pfad wird in current_path_ gespeichert.
-//Wenn der Pfad keine Posen hat, wird abgebrochen (kein lokales Ziel möglich).
-
 void RLController::setPlan(const nav_msgs::msg::Path & path) {
   current_path_ = path;
   if (current_path_.poses.empty()) return;
 
-  const auto robot = robotPoseInMap_(); //Ermittelt zuerst die Robotpose (im Map-Frame).
-  goal_idx_ = nearestIndexTo_(current_path_.poses, robot.pose.position);//Sucht dann den Index der Pose auf dem Pfad, die dem Roboter am nächsten ist (nearestIndexTo_).
-  goal_idx_ = indexAtLookaheadFrom_(current_path_.poses, goal_idx_, lookahead_dist_);//der Punkt, der ungefähr lookahead_dist_ vor dem Roboter auf dem Pfad liegt.
-  
-//TODO:Hier ist der Fehler: die local costmap wird mit 1Hz aktualisiert und dadurch wird ständig ein neues local goal geschickt
-  last_published_goal_ = current_path_.poses[goal_idx_];  //neues Goal bestimmen und publishen
-  //hier umfüllen auf goalstate msg
-  // turtlebot3_msgs::msg::GoalState goal_msg;
-  // goal_msg.pose_x = last_published_goal_.pose.position.x;
-  // goal_msg.pose_y = last_published_goal_.pose.position.y;
 
-  global_path_pub->publish(current_path_);
-  local_goal_pub_->publish(last_published_goal_);
-//speichert den neuen globalen Pfad und setzt sofort ein erstes lokales Ziel ein Stück voraus auf dem Pfad (Lookahead), das veröffentlicht wird.
+  nav_msgs::msg::Path path_odom;
+  path_odom.header = path.header;
+  path_odom.header.frame_id = "odom";
+
+  path_odom.poses.reserve(path.poses.size());
+  for (auto pose : path.poses) {
+    try {
+      auto tf_msg = tf_->lookupTransform("odom", pose.header.frame_id, tf2::TimePointZero);
+      tf2::doTransform(pose, pose, tf_msg);
+      pose.header.frame_id = "odom";
+    } catch (const tf2::TransformException & e) {
+      RCLCPP_WARN(node_->get_logger(), "TF map->odom failed: %s", e.what());
+    }
+    path_odom.poses.push_back(pose);
+  }
+
+  global_path_pub->publish(path_odom);
+
 }
 
-//bewegt das lokale Ziel dynamisch nach vorne,
-//sobald der Roboter nah genug am aktuellen Ziel ist oder es überholt, und publiziert ein neues Ziel nur dann,
-//wenn es sich ausreichend vom alten unterscheidet.
-
-
-//TODO: Entweder hier wirklich NUR neues Goal wenn altes wirklich erreicht, unabhängig ob neuer globaler Pfad!!!
-//ODER: Im BT einstellen, dass neuer globaler Pfad nicht mit 1Hz aktuallisiert wird!!!
-void RLController::maybeAdvanceLocalGoal_() {
-  if (current_path_.poses.empty()) return;
-
-  const auto robot = robotPoseInMap_();
-
-  // erreicht?
-  //d_goal ist die Distanz vom letzten gepublishten Goal zur aktuellen Roboterpose
-  const double d_goal = dist2_(last_published_goal_.pose.position, robot.pose.position);
-  if(d_goal>reach_radius_) return;
-
-  //wenn kleiner als definierter Radius
-  
-  const int near_idx = nearestIndexTo_(current_path_.poses, robot.pose.position);// findet den index der nähesten Pose im Pfad zum Roboter
-  const int new_idx = indexAtLookaheadFrom_(current_path_.poses, near_idx, lookahead_dist_); //findet den Index der Pose im Pfad, welche lookadhead dist weit entfernt
-  //von der Pose ist, die am nähsten zum Roboter ist
-  // if (new_idx > goal_idx_) goal_idx_ = next_idx;//sicherstellen dass nicht rückwärts weglassen??
-  //   {
-  //   new_idx = goal_idx_ + 1;
-  //   if (new_idx >= static_cast<int>(current_path_.poses.size())) {
-  //     new_idx = static_cast<int>(current_path_.poses.size()) - 1;
-  //   }
-  //   }
-  const auto & candidate = current_path_.poses[new_idx];
-  if (dist2_(candidate.pose.position, last_published_goal_.pose.position) > advance_hysteresis_) return;
-
-  goal_idx_ = new_idx;
-  last_published_goal_ = candidate;
-
-  // turtlebot3_msgs::msg::GoalState goal_msg;
-  // goal_msg.pose_x = last_published_goal_.pose.position.x;
-  // goal_msg.pose_y = last_published_goal_.pose.position.y;
-  local_goal_pub_->publish(last_published_goal_);
-  
-}
-
+// Service anfordern um Kommandos zu bekommen
 geometry_msgs::msg::TwistStamped RLController::computeVelocityCommands(const geometry_msgs::msg::PoseStamped & /*pose*/,
-  const geometry_msgs::msg::Twist & /*velocity*/,
-  nav2_core::GoalChecker * /*goal_checker*/)
+  const geometry_msgs::msg::Twist & ,
+  nav2_core::GoalChecker * )
 {
-  // Lokales Ziel ggf. vorziehen / neu publizieren
-  maybeAdvanceLocalGoal_();
 
   geometry_msgs::msg::TwistStamped cmd;
   cmd.header.stamp = node_->now();
@@ -204,12 +121,11 @@ geometry_msgs::msg::TwistStamped RLController::computeVelocityCommands(const geo
   }
 
   auto clamp = [](double v, double lo, double hi){ return std::max(lo, std::min(hi, v)); };
-  cmd.twist.linear.x  = clamp(res->vx, -max_lin_, max_lin_);
+  cmd.twist.linear.x  = res->vx;
   cmd.twist.linear.y  = 0.0;
-  cmd.twist.angular.z = clamp(res->wz, -max_ang_, max_ang_);
+  cmd.twist.angular.z = res->wz;
   return cmd;
 }
-
 void RLController::setSpeedLimit(const double & speed_limit, const bool & percentage) {
   if (speed_limit <= 0.0) { max_lin_ = 0.0; return; }
   if (percentage) {
@@ -219,6 +135,7 @@ void RLController::setSpeedLimit(const double & speed_limit, const bool & percen
     max_lin_ = speed_limit;
   }
 }
+
 
 } // namespace nav2_rl
 

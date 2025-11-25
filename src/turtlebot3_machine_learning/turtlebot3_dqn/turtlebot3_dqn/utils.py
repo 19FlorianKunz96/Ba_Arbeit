@@ -9,6 +9,7 @@ from tensorflow.keras.optimizers import Adam
 from keras.saving import register_keras_serializable
 from tensorflow.keras import initializers
 from tensorflow.keras.layers import Layer
+import numpy as np
 import numpy
 import collections
 import datetime
@@ -422,3 +423,23 @@ def quantile_huber_loss(pred, target, taus, weights=None, kappa=1.0):
     if weights is not None:
         loss = loss * weights
     return tensorflow.reduce_mean(loss)
+
+
+def euler_from_quaternion(quat):
+    x = quat.x
+    y = quat.y
+    z = quat.z
+    w = quat.w
+
+    sinr_cosp = 2 * (w * x + y * z)
+    cosr_cosp = 1 - 2 * (x * x + y * y)
+    roll = np.arctan2(sinr_cosp, cosr_cosp)
+
+    sinp = 2 * (w * y - z * x)
+    pitch = np.arcsin(sinp)
+
+    siny_cosp = 2 * (w * z + x * y)
+    cosy_cosp = 1 - 2 * (y * y + z * z)
+    yaw = np.arctan2(siny_cosp, cosy_cosp)
+
+    return roll, pitch, yaw
