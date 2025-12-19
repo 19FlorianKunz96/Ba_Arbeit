@@ -46,6 +46,7 @@ setup(
             'result_graph = turtlebot3_dqn.result_graph:main',
             'lidar_subscriber = turtlebot3_dqn.Lidar_Subscriber:main',
             'odom_subscriber = turtlebot3_dqn.Odom_Subscriber:main',
+            'evaluation = turtlebot3_dqn.evaluation:main',
 
         ],
     },

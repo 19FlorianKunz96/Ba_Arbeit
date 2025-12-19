@@ -1,4 +1,12 @@
 
+#----------------------------------------------------------------------------------------------------------------------------------------------#
+#                                                         Info
+#----------------------------------------------------------------------------------------------------------------------------------------------#
+#               Dieser Node stellt ausschließlich nur noch den Service zur Auswahl des Steuerbefehls zur Verfügung
+
+#----------------------------------------------------------------------------------------------------------------------------------------------#
+#                                                          Program
+#----------------------------------------------------------------------------------------------------------------------------------------------#
 import os
 from pathlib import Path as FSPath
 import math
@@ -12,6 +20,14 @@ from nav_msgs.msg import Odometry, Path
 from turtlebot3_msgs.srv import RLLocalPath
 from geometry_msgs.msg import PoseStamped
 from turtlebot3_msgs.msg import GoalState
+from geometry_msgs.msg import PoseWithCovarianceStamped
+from gazebo_msgs.msg import ModelStates
+from turtlebot3_msgs.srv import Dqn
+#----------------------------------------------------------------------------------------------------------------------------------------------#
+#                                                       init Quality of Service for AMCL
+#----------------------------------------------------------------------------------------------------------------------------------------------#
+
+from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy, HistoryPolicy, LivelinessPolicy
 
 #----------------------------------------------------------------------------------------------------------------------------------------------#
 #                                                         Load the Agent Classes
@@ -45,6 +61,9 @@ class DQNadvisor(Node):
         self.model_path = os.path.join(self.folder_path,self.episode)
         self.declare_parameter('service_name','/agents/dqn/get_action')
         self.declare_parameter('state_size',28)
+        if not self.has_parameter('use_sim_time'):
+            self.declare_parameter('use_sim_time', True)
+
         self.action_size = 5
 
         self.test_mode = True
@@ -53,19 +72,22 @@ class DQNadvisor(Node):
         self.full_noisy_dense = True
         self.num_quantiles=51
 
+        self.init_pose = None
+
         self.state_size = self.get_parameter('state_size').get_parameter_value().integer_value
         self.obs = np.zeros((1, self.state_size), dtype = np.float32)
 
         self.sub_scan = self.create_subscription(LaserScan, '/scan', self.on_scan, 10)
         self.sub_odom = self.create_subscription(Odometry, '/odom', self.on_odom, 10)
         self.sub_path = self.create_subscription(Path, '/rl/target_path', self.on_path, 1)
+        #self.collission_publisher = self.create_publisher(GoalState,'collission_detection',10)
 
         self.pub_goal = self.create_publisher(GoalState, 'goal', 10)
-       
-        #self.goal_pub = self.create_publisher(GoalState, '/debug',10)
 
         srv_name = self.get_parameter('service_name').value
         self.srv = self.create_service(RLLocalPath, srv_name, self.on_service_handle)
+
+        self.collission_client = self.create_client(Dqn, '/collission_detection')
 
         self.angular_vel = [1.5, 0.75, 0.0, -0.75, -1.5]
 
@@ -83,6 +105,22 @@ class DQNadvisor(Node):
         self.last_index=0
         self.done=True
         self.reached = False
+
+        self.collission_detection = False
+        self.respawn_running = False
+        self.respawn_future = None
+        self.timer = self.create_timer(0.1, self._respawn_tick)
+
+        
+        #self.amcl_counter = 0
+
+        #self.init_act_pose = None
+
+
+        # self.pub = self.create_publisher(PoseWithCovarianceStamped, '/initialpose',1)
+        # self.timer = self.create_timer(1, self.publish_pose)
+
+
         #----------------------------------------------------------------------------------------------------------------------------------------------#
         #                                                         Get the Model
         #----------------------------------------------------------------------------------------------------------------------------------------------#
@@ -116,6 +154,32 @@ class DQNadvisor(Node):
         #----------------------------------------------------------------------------------------------------------------------------------------------#
         #                                                         Functions
         #----------------------------------------------------------------------------------------------------------------------------------------------#
+
+
+    # def publish_pose(self):
+
+    #     if self.init_act_pose is None:
+    #         self.get_logger().warn("init_pose is None – waiting for Gazebo pose")
+    #         return
+    #     msg = PoseWithCovarianceStamped()
+    #     msg.header.frame_id = "map"
+    #     msg.header.stamp = self.get_clock().now().to_msg()
+
+    #     msg.pose.pose.position.x, msg.pose.pose.position.y,msg.pose.pose.orientation.w,msg.pose.pose.orientation.x,msg.pose.pose.orientation.y,msg.pose.pose.orientation.z = self.init_act_pose
+
+    #     # kleine, gültige Kovarianz
+    #     msg.pose.covariance[0] = 0.25
+    #     msg.pose.covariance[7] = 0.25
+    #     msg.pose.covariance[35] = 0.0685
+
+    #     self.pub.publish(msg)
+    #     self.get_logger().info("Initial pose published!")
+
+    #     self.amcl_counter += 1
+
+    #     if self.amcl_counter > 30:
+    #         self.timer.cancel()
+
 
     def on_scan(self, msg:LaserScan):
         self.scan_ranges = []
@@ -153,20 +217,19 @@ class DQNadvisor(Node):
         self.front_min_obstacle_distance = min(self.front_ranges) if self.front_ranges else 10.0
 
     def on_odom(self, msg: Odometry):
+        self.init_act_pose = (msg.pose.pose.position.x,msg.pose.pose.position.y,msg.pose.pose.orientation.w,msg.pose.pose.orientation.x,msg.pose.pose.orientation.y,msg.pose.pose.orientation.z)
         self.robot_pose_x = msg.pose.pose.position.x
         self.robot_pose_y = msg.pose.pose.position.y
         _, _, self.robot_pose_theta = euler_from_quaternion(msg.pose.pose.orientation)
 
-        if not self.global_path or self.reached:
+        if not self.global_path:
             return
         
-        if self.local_goal is None and self.done:
+        if self.local_goal is None or self.done:
             self.sub_target()
             if self.local_goal is None:
                 return
-
-        if self.local_goal is None:
-            return
+#-----------------------------------------------------------------------------------------------------#
         self.goal_pose_x, self.goal_pose_y = self.local_goal
         goal_distance = math.sqrt(
             (self.goal_pose_x - self.robot_pose_x) ** 2
@@ -184,65 +247,71 @@ class DQNadvisor(Node):
 
         self.goal_distance = goal_distance
         self.goal_angle = goal_angle
-
+#------------------------------------------------------------------------------------------------------#
         if goal_distance < 0.3:
             if self.last_index == len(self.global_path) - 1:
-                if not self.reached:
-                    msg_goal = GoalState()
-                    msg_goal.pose_x, msg_goal.pose_y = self.local_goal
-                    msg_goal.success = True 
-                    self.pub_goal.publish(msg_goal)
-                    self.reached = True
-                else:
-                    self.done= True
-                    self.sub_target()
+                msg_goal = GoalState()
+                msg_goal.pose_x, msg_goal.pose_y = self.local_goal
+                msg_goal.success = True 
+                self.pub_goal.publish(msg_goal)
+                self.done=False
+            else:
+                self.done= True
 
 
 
     def on_path(self, msg:Path):
+        #self.collission_detection = False
         self.global_path = msg.poses
         self.last_index = 0
+        self.get_logger().info(f'neuer globaler pfad:{self.global_path[self.last_index]}')
 
     def sub_target(self):
-        msg = GoalState()
-        if not self.global_path or self.reached:
+        if not self.global_path:
             return
         
-        if self.done or self.local_goal is None:
-            chosen = False
-            for n in range(self.last_index, len(self.global_path)):
-                path = self.global_path[n]
-                x = round(float(path.pose.position.x),1)
-                y = round(float(path.pose.position.y),1)
-                distance =  math.hypot(x-self.robot_pose_x,y-self.robot_pose_y)
+        if not self.done:
+            return
+        
+        msg = GoalState()
+        chosen = False
+             
+        for n in range(self.last_index+1, len(self.global_path)):
+            path = self.global_path[n].pose.position
+            x = round(float(path.x),1)
+            y = round(float(path.y),1)
+            distance =  math.hypot(x-self.robot_pose_x,y-self.robot_pose_y)
                 
 
-                if distance > 0.5:
-                    self.local_goal = (x,y)
-                    self.last_index = n
-                    self.done = False
-                    chosen = True
-
-                    msg.pose_x = x
-                    msg.pose_y = y
-                    msg.success = self.done
-                    self.pub_goal.publish(msg)
-                    break
-            
-            if not chosen:
-                last = self.global_path[-1].pose.position
-                self.local_goal = (round(float(last.x),1), (round(float(last.y),1)))
-                self.last_index = len(self.global_path) - 1
+            if distance > 0.5 and distance < 3:
+                self.local_goal = (x,y)
+                self.last_index = n
                 self.done = False
+                chosen = True
 
-                msg.pose_x,msg.pose_y = self.local_goal
-                msg.success=self.done
+                msg.pose_x = x
+                msg.pose_y = y
+                msg.success = self.done
                 self.pub_goal.publish(msg)
+                break
+            
+        if not chosen:
+            last = self.global_path[-1].pose.position
+            self.local_goal = (round(float(last.x),1), (round(float(last.y),1)))
+            self.last_index = len(self.global_path) - 1
+            self.done = False
+
+            msg.pose_x,msg.pose_y = self.local_goal
+            msg.success=self.done
+            self.pub_goal.publish(msg)
 
 
     def build_state(self):
         state = []
         for n, var in enumerate(self.scan_ranges):
+            if var < 0.15:
+                self.collission_detection = True
+                self.get_logger().warn('Agent detected Collission')
             if n % 2 == 0:
                 state.append(float(var))
         state.append(float(self.goal_angle))
@@ -275,8 +344,83 @@ class DQNadvisor(Node):
         angular_z = self.angular_vel[action] if action != 5 else 0.0
         return velocity_x,velocity_y,angular_z
     
+    def _respawn_tick(self):
+        # Nur wenn Sperre aktiv ist und noch kein Future läuft
+        if not self.respawn_running or self.respawn_future is not None:
+            return
+        if not self.collission_client.service_is_ready():
+            return
+
+        req = Dqn.Request()
+        req.init = True
+
+        self.respawn_future = self.collission_client.call_async(req)
+
+        self.respawn_future.add_done_callback(self._respawn_done) # wird aufgerufen wenn Service antwortet
+
+
+    def _respawn_done(self, fut):
+        try:
+            res = fut.result()
+            done = (res is not None) and getattr(res, "done", False)
+        except Exception as e:
+            self.get_logger().error(f"respawn exception: {e}")
+            done = False
+
+        self.get_logger().warn(f"respawn done={done}")
+
+        # egal ob done True/False: Future zurücksetzen
+        self.respawn_future = None
+
+        if done:
+            self.collission_detection = False  # hier genau wie du sagst
+            self.respawn_running = False       # wieder frei geben
+        else:
+            # optional: nochmal versuchen oder nach X Sekunden freigeben
+            self.respawn_running = False
+
+    
+    
+
     def on_service_handle(self,req,resp):
+        
         instruction = self.advise()
+        # Nav2 darf nie aus der Loop kommen, deswegen immer Antwort senden.
+
+
+
+  
+
+            # self.get_logger().warn('Collission detected. Start Respawning')
+
+            # resp.ok = False
+            # resp.msg = 'collission happened'
+
+
+            # col_req = Dqn.Request()
+            # col_req.init = self.collission_detection
+            # future = self.collission_client.call_async(col_req)
+            # rclpy.spin_until_future_complete(self,future,timeout_sec=10.0)
+            # col_res = future.result()
+            
+            # if col_res.done ==True:
+            #     self.get_logger().warn('Antwort kommt zurück')
+            # self.collission_detection = False
+            # self.get_logger().warn('Agent continues.')
+        if self.collission_detection:
+            
+            if not self.respawn_running:
+                self.respawn_running = True  # Sperre setzen
+
+            # Immer Stop ausgeben, solange collision/respawn
+            resp.ok = True
+            resp.vx = 0.0; resp.vy = 0.0; resp.wz = 0.0
+            resp.msg = "collision_stop"
+            resp.action_stamp = self.get_clock().now().to_msg()
+            return resp
+
+
+            
         if instruction is None:
             resp.ok = False
             resp.msg = 'No fresh observation'
