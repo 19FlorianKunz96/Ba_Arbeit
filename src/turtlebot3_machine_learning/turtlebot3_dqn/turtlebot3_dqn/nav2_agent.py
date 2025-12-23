@@ -23,6 +23,7 @@ from turtlebot3_msgs.msg import GoalState
 from geometry_msgs.msg import PoseWithCovarianceStamped
 from gazebo_msgs.msg import ModelStates
 from turtlebot3_msgs.srv import Dqn
+from rclpy.executors import MultiThreadedExecutor
 #----------------------------------------------------------------------------------------------------------------------------------------------#
 #                                                       init Quality of Service for AMCL
 #----------------------------------------------------------------------------------------------------------------------------------------------#
@@ -55,7 +56,7 @@ from tensorflow.keras.optimizers import RMSprop
 
 class DQNadvisor(Node):
     def __init__(self):
-        super().__init__('dqn_advisor') #Call Constructor of parent class(name for the node)
+        super().__init__('dqn_advisor')
         self.folder_path= FSPath('/home/verwalter/turtlebot3_ws/src/turtlebot3_machine_learning/turtlebot3_dqn/evaluation/PER_N2_D3QN/c8afb22e-058d-444b-8e3e-3a218ac2eed4_2025-11-03_stage4_rainbow')
         self.episode = 'stage00004_episode04000.h5'
         self.model_path = os.path.join(self.folder_path,self.episode)
@@ -80,7 +81,6 @@ class DQNadvisor(Node):
         self.sub_scan = self.create_subscription(LaserScan, '/scan', self.on_scan, 10)
         self.sub_odom = self.create_subscription(Odometry, '/odom', self.on_odom, 10)
         self.sub_path = self.create_subscription(Path, '/rl/target_path', self.on_path, 1)
-        #self.collission_publisher = self.create_publisher(GoalState,'collission_detection',10)
 
         self.pub_goal = self.create_publisher(GoalState, 'goal', 10)
 
@@ -106,20 +106,8 @@ class DQNadvisor(Node):
         self.done=True
         self.reached = False
 
+        self.collision_in_progress = False
         self.collission_detection = False
-        self.respawn_running = False
-        self.respawn_future = None
-        self.timer = self.create_timer(0.1, self._respawn_tick)
-
-        
-        #self.amcl_counter = 0
-
-        #self.init_act_pose = None
-
-
-        # self.pub = self.create_publisher(PoseWithCovarianceStamped, '/initialpose',1)
-        # self.timer = self.create_timer(1, self.publish_pose)
-
 
         #----------------------------------------------------------------------------------------------------------------------------------------------#
         #                                                         Get the Model
@@ -154,32 +142,6 @@ class DQNadvisor(Node):
         #----------------------------------------------------------------------------------------------------------------------------------------------#
         #                                                         Functions
         #----------------------------------------------------------------------------------------------------------------------------------------------#
-
-
-    # def publish_pose(self):
-
-    #     if self.init_act_pose is None:
-    #         self.get_logger().warn("init_pose is None – waiting for Gazebo pose")
-    #         return
-    #     msg = PoseWithCovarianceStamped()
-    #     msg.header.frame_id = "map"
-    #     msg.header.stamp = self.get_clock().now().to_msg()
-
-    #     msg.pose.pose.position.x, msg.pose.pose.position.y,msg.pose.pose.orientation.w,msg.pose.pose.orientation.x,msg.pose.pose.orientation.y,msg.pose.pose.orientation.z = self.init_act_pose
-
-    #     # kleine, gültige Kovarianz
-    #     msg.pose.covariance[0] = 0.25
-    #     msg.pose.covariance[7] = 0.25
-    #     msg.pose.covariance[35] = 0.0685
-
-    #     self.pub.publish(msg)
-    #     self.get_logger().info("Initial pose published!")
-
-    #     self.amcl_counter += 1
-
-    #     if self.amcl_counter > 30:
-    #         self.timer.cancel()
-
 
     def on_scan(self, msg:LaserScan):
         self.scan_ranges = []
@@ -261,10 +223,9 @@ class DQNadvisor(Node):
 
 
     def on_path(self, msg:Path):
-        #self.collission_detection = False
         self.global_path = msg.poses
         self.last_index = 0
-        self.get_logger().info(f'neuer globaler pfad:{self.global_path[self.last_index]}')
+        self.get_logger().info(f'neuer globaler Pfad')
 
     def sub_target(self):
         if not self.global_path:
@@ -309,7 +270,7 @@ class DQNadvisor(Node):
     def build_state(self):
         state = []
         for n, var in enumerate(self.scan_ranges):
-            if var < 0.15:
+            if var < 0.15 and not self.collission_detection:
                 self.collission_detection = True
                 self.get_logger().warn('Agent detected Collission')
             if n % 2 == 0:
@@ -344,40 +305,12 @@ class DQNadvisor(Node):
         angular_z = self.angular_vel[action] if action != 5 else 0.0
         return velocity_x,velocity_y,angular_z
     
-    def _respawn_tick(self):
-        # Nur wenn Sperre aktiv ist und noch kein Future läuft
-        if not self.respawn_running or self.respawn_future is not None:
-            return
-        if not self.collission_client.service_is_ready():
-            return
+    def respawn_done(self, future):
+        result = future.result()
+        self.collision_in_progress = False
+        self.collission_detection = False
+        self.get_logger().warn('Agent continues.') 
 
-        req = Dqn.Request()
-        req.init = True
-
-        self.respawn_future = self.collission_client.call_async(req)
-
-        self.respawn_future.add_done_callback(self._respawn_done) # wird aufgerufen wenn Service antwortet
-
-
-    def _respawn_done(self, fut):
-        try:
-            res = fut.result()
-            done = (res is not None) and getattr(res, "done", False)
-        except Exception as e:
-            self.get_logger().error(f"respawn exception: {e}")
-            done = False
-
-        self.get_logger().warn(f"respawn done={done}")
-
-        # egal ob done True/False: Future zurücksetzen
-        self.respawn_future = None
-
-        if done:
-            self.collission_detection = False  # hier genau wie du sagst
-            self.respawn_running = False       # wieder frei geben
-        else:
-            # optional: nochmal versuchen oder nach X Sekunden freigeben
-            self.respawn_running = False
 
     
     
@@ -385,34 +318,16 @@ class DQNadvisor(Node):
     def on_service_handle(self,req,resp):
         
         instruction = self.advise()
-        # Nav2 darf nie aus der Loop kommen, deswegen immer Antwort senden.
 
-
-
-  
-
-            # self.get_logger().warn('Collission detected. Start Respawning')
-
-            # resp.ok = False
-            # resp.msg = 'collission happened'
-
-
-            # col_req = Dqn.Request()
-            # col_req.init = self.collission_detection
-            # future = self.collission_client.call_async(col_req)
-            # rclpy.spin_until_future_complete(self,future,timeout_sec=10.0)
-            # col_res = future.result()
-            
-            # if col_res.done ==True:
-            #     self.get_logger().warn('Antwort kommt zurück')
-            # self.collission_detection = False
-            # self.get_logger().warn('Agent continues.')
+    # Nav2 darf nie aus der Loop kommen, deswegen immer Antwort senden.
         if self.collission_detection:
-            
-            if not self.respawn_running:
-                self.respawn_running = True  # Sperre setzen
+            collission_request = Dqn.Request()
+            if not self.collision_in_progress:
+                self.collision_in_progress = True
+                future = self.collission_client.call_async(collission_request)
 
-            # Immer Stop ausgeben, solange collision/respawn
+                future.add_done_callback(self.respawn_done)
+
             resp.ok = True
             resp.vx = 0.0; resp.vy = 0.0; resp.wz = 0.0
             resp.msg = "collision_stop"

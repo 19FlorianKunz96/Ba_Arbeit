@@ -44,7 +44,10 @@ from gazebo_msgs.msg import EntityState
 from action_msgs.msg import GoalStatus
 from nav_msgs.msg import Odometry
 from turtlebot3_msgs.msg import GoalState
-
+from std_srvs.srv import Empty
+from nav2_msgs.srv import LoadMap
+from nav2_msgs.srv import ClearEntireCostmap
+from nav2_msgs.srv import ManageLifecycleNodes
 #----------------------------------------------------------------------------------------------------------------------------------------------#
 #                                                          Standart Libraries
 #----------------------------------------------------------------------------------------------------------------------------------------------#
@@ -53,10 +56,14 @@ import time
 import math
 import random
 
+import rclpy.time
+
 
 class Evaluator(Node):
     def __init__(self):
         super().__init__('evaluator')
+        #self.declare_parameter('use_sim_time', True)
+
 #----------------------------------------------------------------------------------------------------------------------------------------------#
 #                                                          Feedback + Visualisierung
 #----------------------------------------------------------------------------------------------------------------------------------------------#
@@ -101,24 +108,29 @@ class Evaluator(Node):
         self.last_safe_goal.pose.pose.position.x,self.last_safe_goal.pose.pose.position.y = self.goals[0]
         self.start_pose = PoseWithCovarianceStamped()
         self.start_pose.pose.pose.position.x,self.start_pose.pose.pose.position.y = self.goals[0]    
-        self.init_act_pose = None
-
+        self.init_act_pose = (0.0,0.0,1.0,0.0,0.0,0.0)
 
 #----------------------------------------------------------------------------------------------------------------------------------------------#
 #                                                          Services + Topics + Actions
 #----------------------------------------------------------------------------------------------------------------------------------------------#
-    
-        self.callback_group = ReentrantCallbackGroup()
+
     #Topics
 
         self.odom_sub = self.create_subscription(Odometry,'odom',self.odom_callback,10)
         self.amcl_counter = 0
         self.initial_pose_pub = self.create_publisher(PoseWithCovarianceStamped,'/initialpose',10)
-        self.timer = self.create_timer(1, self.publish_initial_pose)
 
     #Services
-        self.respawn_client = self.create_client(SetEntityState, '/set_entity_state',callback_group = self.callback_group)
-        self.collission_detection_service = self.create_service(Dqn, '/collission_detection',self.collission_callback,callback_group=self.callback_group)
+        self.respawn_client = self.create_client(SetEntityState, '/set_entity_state')
+        self.collission_detection_service = self.create_service(Dqn, '/collission_detection',self.collission_callback)
+        self.reset_client = self.create_client(Empty, '/reset_simulation')
+        self.reset_global_costmap_client = self.create_client(ClearEntireCostmap, '/global_costmap/clear_entirely_global_costmap')
+        self.reset_local_costmap_client = self.create_client(ClearEntireCostmap, '/local_costmap/clear_entirely_local_costmap')
+        self.lifecycle_manager = self.create_client(ManageLifecycleNodes,'/lifecycle_manager_navigation/manage_nodes')
+        self.load_map_client = self.create_client(LoadMap,'/map_server/load_map')
+
+        self.path_to_map = '/home/verwalter/maps/turtlebot3_dqn_stage4.yaml'
+
 
 
     #Actions
@@ -130,23 +142,53 @@ class Evaluator(Node):
         self.nav_goal_handle = None
         self.is_resetting = False
         
-
+        self.init_timer = self.create_timer(1, self.init_amcl)
 #----------------------------------------------------------------------------------------------------------------------------------------------#
 #                                                          Class - Functions
 #----------------------------------------------------------------------------------------------------------------------------------------------#
 
+    def init_amcl(self):
+        self.publish_initial_pose()
+        self.amcl_counter +=1
+        if self.amcl_counter > 2:
+            self.amcl_counter = 0
+            self.init_timer.destroy()
+            self.send_next_goal()
+
+                
 
     def collission_callback(self,req,resp):
         
         self.collission_counter += 1 
         self.get_logger().info(f'Status: success={self.success_counter}, 'f'failure={self.collission_counter}')
 
-        ok = self.respawn_robot()
-        if ok:
-            self.get_logger().info("Robot successfully respawned")
-        else:
-            self.get_logger().error("Respawn failed")
-        resp.done = True
+        #1. Roboter in Gazebo respawnen
+        target_pose = self.respawn_robot()
+        #self.reset_simulation()
+        time.sleep(0.2)
+
+        # self.reload_map()
+        # time.sleep(0.2)
+
+        self.clear_global_costmap()
+        time.sleep(0.2)
+
+        self.clear_local_costmap()
+        time.sleep(0.2)
+
+        # self.reset_nav2()
+        # time.sleep(0.2)
+
+        # self.startup_nav2()
+        # time.sleep(0.2)
+
+        #2. AMCL Pose neu setzen mit neu gespawnter Roboterpose
+        self.relocalize_amcl(target_pose)
+        time.sleep(0.2)
+
+        #3. Goal neu setzen
+        self.send_next_goal()
+
         return resp
     
     def publish_initial_pose(self):
@@ -155,7 +197,7 @@ class Evaluator(Node):
             return
         msg = PoseWithCovarianceStamped()
         msg.header.frame_id = "map"
-        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.stamp = rclpy.time.Time().to_msg()
 
         msg.pose.pose.position.x, msg.pose.pose.position.y,msg.pose.pose.orientation.w,msg.pose.pose.orientation.x,msg.pose.pose.orientation.y,msg.pose.pose.orientation.z = self.init_act_pose
 
@@ -163,50 +205,78 @@ class Evaluator(Node):
         msg.pose.covariance[0] = 0.25
         msg.pose.covariance[7] = 0.25
         msg.pose.covariance[35] = 0.0685
-
-        if self.amcl_counter == 0:
-            self.initial_pose_pub.publish(msg)
-            self.get_logger().info("Initial pose published!")
-
-        self.amcl_counter += 1
-
-        if self.amcl_counter > 2:
-            self.timer.cancel()
-            self.send_next_goal()
-            self.amcl_counter = 0
-
+        self.initial_pose_pub.publish(msg)
+        time.sleep(1)
+        self.get_logger().info("Initial pose published!")
 
     def odom_callback(self,msg:Odometry):
-
-        # aktuelle Pose wird immer empfangen -> kann später auch für etwas anderes genutzt werden. 
-        # Momentan nur für Initialpose beim start der Evaluation verwendet für AMCL
          self.init_act_pose = (msg.pose.pose.position.x,msg.pose.pose.position.y,msg.pose.pose.orientation.w,msg.pose.pose.orientation.x,msg.pose.pose.orientation.y,msg.pose.pose.orientation.z)
 
+    def reset_nav2(self):
+        req = ManageLifecycleNodes.Request()
+        req.command = 3
+        future = self.lifecycle_manager.call_async(req)
+        rclpy.spin_until_future_complete(self,future,timeout_sec=10.0)
+        self.get_logger().warn("NAV2 Reset done...")
+
+    def startup_nav2(self):
+        req = ManageLifecycleNodes.Request()
+        req.command = 0
+        future = self.lifecycle_manager.call_async(req)
+        rclpy.spin_until_future_complete(self,future,timeout_sec=10.0)
+        self.get_logger().warn("NAV2 Startup done...")
+    
+    def clear_local_costmap(self):
+        req = ClearEntireCostmap.Request()
+        future = self.reset_local_costmap_client.call_async(req)
+        rclpy.spin_until_future_complete(self,future,timeout_sec=3.0)
+        self.get_logger().warn("Clear Local Costmap done...")
+
+    def clear_global_costmap(self):
+        req = ClearEntireCostmap.Request()
+        future = self.reset_global_costmap_client.call_async(req)
+        rclpy.spin_until_future_complete(self,future,timeout_sec=3.0)
+        self.get_logger().warn("Clear Global Costmap done...")
+
+    def reload_map(self):
+        req = LoadMap.Request()
+        req.map_url=self.path_to_map
+        future = self.load_map_client.call_async(req)
+        rclpy.spin_until_future_complete(self,future,timeout_sec=10.0)
+        self.get_logger().warn("Reload Map done...")
+
+    def reset_simulation(self):
+        self.get_logger().info("Reset Simulation...")
+        req = Empty.Request()
+        for i in range(2):
+            self.publish_initial_pose()
+            time.sleep(0.2)
+        future = self.reset_global_costmap_client.call_async(req)
+        self.get_logger().info("Reset done...")   
+        rclpy.spin_until_future_complete(self,future,timeout_sec=10.0)
+
     def relocalize_amcl(self,pose):
+        self.get_logger().info("Set AMCL...")
+        time.sleep(1)
         msg = PoseWithCovarianceStamped()
         msg.header.frame_id = self.frame_id
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.pose.pose = pose
+        msg.pose.covariance[0] = 0.05
+        msg.pose.covariance[7] = 0.05
+        msg.pose.covariance[35] = 0.1
 
-        msg.pose.covariance[0] = 0.05  # x
-        msg.pose.covariance[7] = 0.05  # y
-        msg.pose.covariance[35] = 0.1  # yaw
-
-        for i in range(3):
+        for i in range(2):
             self.initial_pose_pub.publish(msg)
-            time.sleep(1)
-        self.get_logger().info(f"AMCL Initialpose gesendet.")
-
-        return True
+            time.sleep(0.2)
 
 
     def respawn_robot(self):
-
-        #self.cancel_navigation_blocking(timeout_sec=1.0)
-        #globalen pfad neu berechnen und an agent schicken ?
+        self.get_logger().info("Set Entity...")
+        #wenn keine last safe pose gibt und start pose existiert und nicht none ist, dann ist last safe pose die start pose
         if self.last_safe_pose is None and getattr(self, "start_pose", None) is not None:
             self.last_safe_pose = self.start_pose
-
+        #wenn last safe pose ist none und last safe goal ist none( kein ziel angefahren bis jetzt), dann return
         if self.last_safe_pose is None and self.last_safe_goal is None:
             self.get_logger().warn("Kein gültiges Respwanziel vorhanden.")
             return
@@ -214,18 +284,18 @@ class Evaluator(Node):
         state = EntityState()
         state.name='waffle_pi'
 
+        #zielpose ist letztes goal, wenn vorhanden, ansonsten last safe pose
         if self.last_safe_goal is not None:
             target_pose = self.last_safe_goal.pose.pose
         else:
-            target_pose = self.last_safe_pose   #.pose.pose
+            target_pose = self.last_safe_pose.pose.pose   #.pose.pose
         
         state.pose = target_pose
-
         req = SetEntityState.Request()
         req.state = state
 
         future = self.respawn_client.call_async(req)
-        rclpy.spin_until_future_complete(self,future,timeout_sec=2.0)
+        rclpy.spin_until_future_complete(self,future,timeout_sec=1.0)
         try:
             result = future.result()
         except Exception as e:
@@ -233,24 +303,8 @@ class Evaluator(Node):
 
         else:
             self.get_logger().info("Respawn in Gazebo OK.")
-        
-        time.sleep(1)
-        ok = self.relocalize_amcl(target_pose)
-        while ok != True:
-            self.get_logger().info('Locating')
-            time.sleep(0.1)
 
-        ok = False
-        time.sleep(1)
-        ok = self.send_next_goal()
-
-        while ok != True:
-            self.get_logger().info('Sending Goal')
-            time.sleep(0.1)
-
-        return True
-
-
+        return target_pose
 
     def create_goal(self) -> PoseStamped:
         x,y = self.goals[self.current_run % len(self.goals)]
@@ -298,7 +352,7 @@ class Evaluator(Node):
 
         return True
 
-    def goal_response_callback(self,future):
+    def goal_response_callback(self,future):###
         goal_handle = future.result()
         if not goal_handle.accepted:
             self.collission_counter += 1
@@ -328,11 +382,11 @@ class Evaluator(Node):
             self.get_logger().info(f'Current stats: success={self.success_counter}, 'f'failure={self.collission_counter}')
             self.send_next_goal()
 
-        else:
-            self.collission_counter += 1
-            self.get_logger().warn(f'Goal #{self.current_run} FAILED (nav2 result={result_msg}, 'f'action status={status}) after {duration:.2f} s.')
-            self.get_logger().info(f'Current stats: success={self.success_counter}, 'f'failure={self.collission_counter}')
-            self.respawn_robot()
+        # else:
+        #     self.collission_counter += 1
+        #     self.get_logger().warn(f'Goal #{self.current_run} FAILED (nav2 result={result_msg}, 'f'action status={status}) after {duration:.2f} s.')
+        #     self.get_logger().info(f'Current stats: success={self.success_counter}, 'f'failure={self.collission_counter}')
+        #     self.respawn_robot()
 
 
     def feedback_callback(self, feedback_msg):
@@ -345,9 +399,7 @@ class Evaluator(Node):
 def main():
     rclpy.init()
     node = Evaluator()
-    executor = MultiThreadedExecutor(num_threads = 4)
-    executor.add_node(node)
-    executor.spin()
+    rclpy.spin(node)
 
 if __name__ == '__main__':
     main()
