@@ -43,11 +43,13 @@ from gazebo_msgs.srv import SetEntityState
 from gazebo_msgs.msg import EntityState
 from action_msgs.msg import GoalStatus
 from nav_msgs.msg import Odometry
+from sensor_msgs.msg import LaserScan
 from turtlebot3_msgs.msg import GoalState
 from std_srvs.srv import Empty
 from nav2_msgs.srv import LoadMap
 from nav2_msgs.srv import ClearEntireCostmap
 from nav2_msgs.srv import ManageLifecycleNodes
+from std_msgs.msg import Bool
 #----------------------------------------------------------------------------------------------------------------------------------------------#
 #                                                          Standart Libraries
 #----------------------------------------------------------------------------------------------------------------------------------------------#
@@ -76,6 +78,8 @@ class Evaluator(Node):
         self.success_counter = 0
         self.collission_counter = 0
         self.current_start_time = None
+
+        self.collision_detector = False
 
     #Visualisierung
         plt.ion()
@@ -119,6 +123,8 @@ class Evaluator(Node):
         self.odom_sub = self.create_subscription(Odometry,'odom',self.odom_callback,10)
         self.amcl_counter = 0
         self.initial_pose_pub = self.create_publisher(PoseWithCovarianceStamped,'/initialpose',10)
+        self.sub_scan = self.create_subscription(LaserScan, '/scan', self.on_scan, 1)
+        self.collision_publisher = self.create_publisher(Bool,'/collision_stop',10)
 
     #Services
         self.respawn_client = self.create_client(SetEntityState, '/set_entity_state')
@@ -146,6 +152,16 @@ class Evaluator(Node):
 #----------------------------------------------------------------------------------------------------------------------------------------------#
 #                                                          Class - Functions
 #----------------------------------------------------------------------------------------------------------------------------------------------#
+    def on_scan(self, msg:LaserScan):
+        for distance in msg.ranges:
+            if distance < 0.15:
+                msg = Bool()
+                msg.data = True
+                self.collision_publisher.publish(msg)
+                self.collision_detector = True
+                self.collision_elimination()
+                break
+        
 
     def init_amcl(self):
         self.publish_initial_pose()
@@ -154,6 +170,44 @@ class Evaluator(Node):
             self.amcl_counter = 0
             self.init_timer.destroy()
             self.send_next_goal()
+
+    def collision_elimination(self):
+        self.get_logger().warn(f'Collision detected... Starting Respawn')
+        self.collission_counter+=1
+        self.get_logger().info(f'Status: success={self.success_counter}, 'f'failure={self.collission_counter}')
+
+        #1. Roboter in Gazebo respawnen
+        target_pose = self.respawn_robot()
+        #self.reset_simulation()
+        time.sleep(0.2)
+
+        # self.reload_map()
+        # time.sleep(0.2)
+
+        self.clear_global_costmap()
+        time.sleep(0.2)
+
+        self.clear_local_costmap()
+        time.sleep(0.2)
+
+        # self.reset_nav2()
+        # time.sleep(3)
+
+        # self.startup_nav2()
+        # time.sleep(3)
+
+        #2. AMCL Pose neu setzen mit neu gespawnter Roboterpose
+        self.relocalize_amcl(target_pose)
+        time.sleep(0.2)
+
+        #3. Goal neu setzen
+        self.send_next_goal()
+        self.collision_detector = False
+        self.get_logger().warn(f'Ready !!!')
+        msg = Bool()
+        msg.data = self.collision_detector
+        self.collision_publisher.publish(msg)
+
 
                 
 
@@ -272,30 +326,53 @@ class Evaluator(Node):
 
 
     def respawn_robot(self):
-        self.get_logger().info("Set Entity...")
-        #wenn keine last safe pose gibt und start pose existiert und nicht none ist, dann ist last safe pose die start pose
-        if self.last_safe_pose is None and getattr(self, "start_pose", None) is not None:
-            self.last_safe_pose = self.start_pose
-        #wenn last safe pose ist none und last safe goal ist none( kein ziel angefahren bis jetzt), dann return
-        if self.last_safe_pose is None and self.last_safe_goal is None:
-            self.get_logger().warn("Kein gültiges Respwanziel vorhanden.")
-            return
+        # self.get_logger().info("Set Entity...")
+        # #wenn keine last safe pose gibt und start pose existiert und nicht none ist, dann ist last safe pose die start pose
+        # if self.last_safe_pose is None and getattr(self, "start_pose", None) is not None:
+        #     self.last_safe_pose = self.start_pose
+        # #wenn last safe pose ist none und last safe goal ist none( kein ziel angefahren bis jetzt), dann return
+        # if self.last_safe_pose is None and self.last_safe_goal is None:
+        #     self.get_logger().warn("Kein gültiges Respwanziel vorhanden.")
+        #     return
         
+        # state = EntityState()
+        # state.name='waffle_pi'
+
+        # #zielpose ist letztes goal, wenn vorhanden, ansonsten last safe pose
+        # if self.last_safe_goal is not None:
+        #     target_pose = self.last_safe_goal.pose.pose
+        # else:
+        #     target_pose = self.last_safe_pose.pose.pose   #.pose.pose
+        
+        # state.pose = target_pose
+        # req = SetEntityState.Request()
+        # req.state = state
+
+        # future = self.respawn_client.call_async(req)
+        # rclpy.spin_until_future_complete(self,future,timeout_sec=1.0)
+        # try:
+        #     result = future.result()
+        # except Exception as e:
+        #     self.get_logger().error(f"Respawn-Service fehlgeschlagen: {e}")
+
+        # else:
+        #     self.get_logger().info("Respawn in Gazebo OK.")
+
+        #neues Programm: hier soll in Zukunft immer das angefahrene Ziel bei einer Kollision zum neuen Startpunkt werden
+        self.get_logger().info("Set Entity...")
+        self.current_run +=1
         state = EntityState()
         state.name='waffle_pi'
 
-        #zielpose ist letztes goal, wenn vorhanden, ansonsten last safe pose
-        if self.last_safe_goal is not None:
-            target_pose = self.last_safe_goal.pose.pose
-        else:
-            target_pose = self.last_safe_pose.pose.pose   #.pose.pose
-        
+        target_pose = self.current_goal.pose
+
         state.pose = target_pose
         req = SetEntityState.Request()
         req.state = state
 
         future = self.respawn_client.call_async(req)
         rclpy.spin_until_future_complete(self,future,timeout_sec=1.0)
+
         try:
             result = future.result()
         except Exception as e:
@@ -303,6 +380,9 @@ class Evaluator(Node):
 
         else:
             self.get_logger().info("Respawn in Gazebo OK.")
+
+        
+
 
         return target_pose
 

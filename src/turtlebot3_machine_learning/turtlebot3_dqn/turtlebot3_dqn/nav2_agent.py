@@ -24,6 +24,7 @@ from geometry_msgs.msg import PoseWithCovarianceStamped
 from gazebo_msgs.msg import ModelStates
 from turtlebot3_msgs.srv import Dqn
 from rclpy.executors import MultiThreadedExecutor
+from std_msgs.msg import Bool
 #----------------------------------------------------------------------------------------------------------------------------------------------#
 #                                                       init Quality of Service for AMCL
 #----------------------------------------------------------------------------------------------------------------------------------------------#
@@ -81,6 +82,7 @@ class DQNadvisor(Node):
         self.sub_scan = self.create_subscription(LaserScan, '/scan', self.on_scan, 10)
         self.sub_odom = self.create_subscription(Odometry, '/odom', self.on_odom, 10)
         self.sub_path = self.create_subscription(Path, '/rl/target_path', self.on_path, 1)
+        self.sub_collsion = self.create_subscription(Bool, '/collision_stop', self.on_collision_stop, 1)
 
         self.pub_goal = self.create_publisher(GoalState, 'goal', 10)
 
@@ -108,6 +110,7 @@ class DQNadvisor(Node):
 
         self.collision_in_progress = False
         self.collission_detection = False
+        self.collision_publishing = False
 
         #----------------------------------------------------------------------------------------------------------------------------------------------#
         #                                                         Get the Model
@@ -142,6 +145,13 @@ class DQNadvisor(Node):
         #----------------------------------------------------------------------------------------------------------------------------------------------#
         #                                                         Functions
         #----------------------------------------------------------------------------------------------------------------------------------------------#
+    def on_collision_stop(self,msg:Bool):
+        self.collision_publishing = msg.data
+        if self.collision_publishing:
+            self.get_logger().warn(f'Stop... Collision...')
+        else:
+            self.get_logger().warn(f'Moving... Collision fixed...')
+
 
     def on_scan(self, msg:LaserScan):
         self.scan_ranges = []
@@ -270,9 +280,14 @@ class DQNadvisor(Node):
     def build_state(self):
         state = []
         for n, var in enumerate(self.scan_ranges):
-            if var < 0.15 and not self.collission_detection:
-                self.collission_detection = True
-                self.get_logger().warn('Agent detected Collission')
+
+            #TODO: zum Test wurde Kollisionsdetektion in das Evaluation Node verschoben
+            #somit ist dieser Node nur noch für den AgentenService zuständig. Keine Unterbrechung mehr durch Service Calls
+
+            # if var < 0.15 and not self.collission_detection:
+            #     self.collission_detection = True
+            #     self.get_logger().warn('Agent detected Collission')
+
             if n % 2 == 0:
                 state.append(float(var))
         state.append(float(self.goal_angle))
@@ -320,22 +335,28 @@ class DQNadvisor(Node):
         instruction = self.advise()
 
     # Nav2 darf nie aus der Loop kommen, deswegen immer Antwort senden.
-        if self.collission_detection:
-            collission_request = Dqn.Request()
-            if not self.collision_in_progress:
-                self.collision_in_progress = True
-                future = self.collission_client.call_async(collission_request)
+        # if self.collission_detection:
+        #     collission_request = Dqn.Request()
+        #     if not self.collision_in_progress:
+        #         self.collision_in_progress = True
+        #         future = self.collission_client.call_async(collission_request)
 
-                future.add_done_callback(self.respawn_done)
+        #         future.add_done_callback(self.respawn_done)
 
+        #     resp.ok = True
+        #     resp.vx = 0.0; resp.vy = 0.0; resp.wz = 0.0
+        #     resp.msg = "collision_stop"
+        #     resp.action_stamp = self.get_clock().now().to_msg()
+        #     return resp
+
+
+        if self.collision_publishing:
             resp.ok = True
             resp.vx = 0.0; resp.vy = 0.0; resp.wz = 0.0
             resp.msg = "collision_stop"
             resp.action_stamp = self.get_clock().now().to_msg()
             return resp
 
-
-            
         if instruction is None:
             resp.ok = False
             resp.msg = 'No fresh observation'
