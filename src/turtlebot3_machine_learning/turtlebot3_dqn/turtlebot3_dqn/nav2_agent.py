@@ -2,7 +2,8 @@
 #----------------------------------------------------------------------------------------------------------------------------------------------#
 #                                                         Info
 #----------------------------------------------------------------------------------------------------------------------------------------------#
-#               Dieser Node stellt ausschließlich nur noch den Service zur Auswahl des Steuerbefehls zur Verfügung
+#               Dieser Node stellt ausschließlich nur noch den Service zur Auswahl des Steuerbefehls zur Verfügung und
+#               unterteilt einen globalen Pfad in kleine Teilziele.
 
 #----------------------------------------------------------------------------------------------------------------------------------------------#
 #                                                          Program
@@ -145,6 +146,7 @@ class DQNadvisor(Node):
         #----------------------------------------------------------------------------------------------------------------------------------------------#
         #                                                         Functions
         #----------------------------------------------------------------------------------------------------------------------------------------------#
+    #Hört ob eine Kollision bepublisht wird
     def on_collision_stop(self,msg:Bool):
         self.collision_publishing = msg.data
         if self.collision_publishing:
@@ -220,12 +222,9 @@ class DQNadvisor(Node):
         self.goal_distance = goal_distance
         self.goal_angle = goal_angle
 #------------------------------------------------------------------------------------------------------#
+#Wenn ein Subtarget erreicht wurde
         if goal_distance < 0.3:
             if self.last_index == len(self.global_path) - 1:
-                msg_goal = GoalState()
-                msg_goal.pose_x, msg_goal.pose_y = self.local_goal
-                msg_goal.success = True 
-                self.pub_goal.publish(msg_goal)
                 self.done=False
             else:
                 self.done= True
@@ -259,11 +258,6 @@ class DQNadvisor(Node):
                 self.last_index = n
                 self.done = False
                 chosen = True
-
-                msg.pose_x = x
-                msg.pose_y = y
-                msg.success = self.done
-                self.pub_goal.publish(msg)
                 break
             
         if not chosen:
@@ -272,22 +266,9 @@ class DQNadvisor(Node):
             self.last_index = len(self.global_path) - 1
             self.done = False
 
-            msg.pose_x,msg.pose_y = self.local_goal
-            msg.success=self.done
-            self.pub_goal.publish(msg)
-
-
     def build_state(self):
         state = []
         for n, var in enumerate(self.scan_ranges):
-
-            #TODO: zum Test wurde Kollisionsdetektion in das Evaluation Node verschoben
-            #somit ist dieser Node nur noch für den AgentenService zuständig. Keine Unterbrechung mehr durch Service Calls
-
-            # if var < 0.15 and not self.collission_detection:
-            #     self.collission_detection = True
-            #     self.get_logger().warn('Agent detected Collission')
-
             if n % 2 == 0:
                 state.append(float(var))
         state.append(float(self.goal_angle))
@@ -319,36 +300,10 @@ class DQNadvisor(Node):
         velocity_y=0.0
         angular_z = self.angular_vel[action] if action != 5 else 0.0
         return velocity_x,velocity_y,angular_z
-    
-    def respawn_done(self, future):
-        result = future.result()
-        self.collision_in_progress = False
-        self.collission_detection = False
-        self.get_logger().warn('Agent continues.') 
 
 
-    
-    
-
-    def on_service_handle(self,req,resp):
-        
+    def on_service_handle(self,req,resp):       
         instruction = self.advise()
-
-    # Nav2 darf nie aus der Loop kommen, deswegen immer Antwort senden.
-        # if self.collission_detection:
-        #     collission_request = Dqn.Request()
-        #     if not self.collision_in_progress:
-        #         self.collision_in_progress = True
-        #         future = self.collission_client.call_async(collission_request)
-
-        #         future.add_done_callback(self.respawn_done)
-
-        #     resp.ok = True
-        #     resp.vx = 0.0; resp.vy = 0.0; resp.wz = 0.0
-        #     resp.msg = "collision_stop"
-        #     resp.action_stamp = self.get_clock().now().to_msg()
-        #     return resp
-
 
         if self.collision_publishing:
             resp.ok = True

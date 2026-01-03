@@ -4,13 +4,6 @@
 # Anahnd von Odom Daten lokalisieren funktioniert.
 # Karten können im Docker Container mit SDF2MAP ohne SLAM generiert werden
 
-#TODO: 
-
-##!!!!!!!!!!!!!!!!!!!!!  Goals müssen so generiert werden, dass es für jede map passt !!!!!!!!!!!!!
-##Vll Liste für jede Map? irgendwie mit YAML File ? 
-
-#Grafik erstellen wie die Nodes in Nav2-Gazebo-Agent-Evaluation zusammenhängen und interagieren
-#Das selbe vll auch noch für den Trainingsagenten
 
 #TODO:
 # Metriken Plot
@@ -128,7 +121,6 @@ class Evaluator(Node):
 
     #Services
         self.respawn_client = self.create_client(SetEntityState, '/set_entity_state')
-        self.collission_detection_service = self.create_service(Dqn, '/collission_detection',self.collission_callback)
         self.reset_client = self.create_client(Empty, '/reset_simulation')
         self.reset_global_costmap_client = self.create_client(ClearEntireCostmap, '/global_costmap/clear_entirely_global_costmap')
         self.reset_local_costmap_client = self.create_client(ClearEntireCostmap, '/local_costmap/clear_entirely_local_costmap')
@@ -208,42 +200,6 @@ class Evaluator(Node):
         msg.data = self.collision_detector
         self.collision_publisher.publish(msg)
 
-
-                
-
-    def collission_callback(self,req,resp):
-        
-        self.collission_counter += 1 
-        self.get_logger().info(f'Status: success={self.success_counter}, 'f'failure={self.collission_counter}')
-
-        #1. Roboter in Gazebo respawnen
-        target_pose = self.respawn_robot()
-        #self.reset_simulation()
-        time.sleep(0.2)
-
-        # self.reload_map()
-        # time.sleep(0.2)
-
-        self.clear_global_costmap()
-        time.sleep(0.2)
-
-        self.clear_local_costmap()
-        time.sleep(0.2)
-
-        # self.reset_nav2()
-        # time.sleep(0.2)
-
-        # self.startup_nav2()
-        # time.sleep(0.2)
-
-        #2. AMCL Pose neu setzen mit neu gespawnter Roboterpose
-        self.relocalize_amcl(target_pose)
-        time.sleep(0.2)
-
-        #3. Goal neu setzen
-        self.send_next_goal()
-
-        return resp
     
     def publish_initial_pose(self):
         if self.init_act_pose is None:
@@ -326,38 +282,6 @@ class Evaluator(Node):
 
 
     def respawn_robot(self):
-        # self.get_logger().info("Set Entity...")
-        # #wenn keine last safe pose gibt und start pose existiert und nicht none ist, dann ist last safe pose die start pose
-        # if self.last_safe_pose is None and getattr(self, "start_pose", None) is not None:
-        #     self.last_safe_pose = self.start_pose
-        # #wenn last safe pose ist none und last safe goal ist none( kein ziel angefahren bis jetzt), dann return
-        # if self.last_safe_pose is None and self.last_safe_goal is None:
-        #     self.get_logger().warn("Kein gültiges Respwanziel vorhanden.")
-        #     return
-        
-        # state = EntityState()
-        # state.name='waffle_pi'
-
-        # #zielpose ist letztes goal, wenn vorhanden, ansonsten last safe pose
-        # if self.last_safe_goal is not None:
-        #     target_pose = self.last_safe_goal.pose.pose
-        # else:
-        #     target_pose = self.last_safe_pose.pose.pose   #.pose.pose
-        
-        # state.pose = target_pose
-        # req = SetEntityState.Request()
-        # req.state = state
-
-        # future = self.respawn_client.call_async(req)
-        # rclpy.spin_until_future_complete(self,future,timeout_sec=1.0)
-        # try:
-        #     result = future.result()
-        # except Exception as e:
-        #     self.get_logger().error(f"Respawn-Service fehlgeschlagen: {e}")
-
-        # else:
-        #     self.get_logger().info("Respawn in Gazebo OK.")
-
         #neues Programm: hier soll in Zukunft immer das angefahrene Ziel bei einer Kollision zum neuen Startpunkt werden
         self.get_logger().info("Set Entity...")
         self.current_run +=1
