@@ -51,8 +51,9 @@ import matplotlib.pyplot as plt
 import time
 import math
 import random
-
+import csv
 import rclpy.time
+import pandas as pd
 
 
 class Evaluator(Node):
@@ -60,6 +61,7 @@ class Evaluator(Node):
         super().__init__('evaluator')
         
         self.classic_mode = False
+        self.metrics = dict()
 
 #----------------------------------------------------------------------------------------------------------------------------------------------#
 #                                                          Feedback + Visualisierung
@@ -70,7 +72,7 @@ class Evaluator(Node):
         self.feedback=None
         self.last_feedback_time = 0.0
 
-        self.n_runs = 15
+        self.n_runs = 5
         self.current_run= 0
         self.success_counter = 0
         self.collission_counter = 0
@@ -118,6 +120,8 @@ class Evaluator(Node):
         self.start_pose.pose.pose.position.x,self.start_pose.pose.pose.position.y = self.goals[0]    
         self.init_act_pose = (0.0,0.0,1.0,0.0,0.0,0.0)
 
+        self.folder_path = '/home/verwalter/turtlebot3_ws/src/turtlebot3_machine_learning/turtlebot3_dqn/Evaluation_RL_Klassisch_Log'
+        self.save_log_info = f'/Stage{self.stage}_Planner_.csv' #Auch action space , welcher agent, klassisch, ... angeben
 #----------------------------------------------------------------------------------------------------------------------------------------------#
 #                                                          Services + Topics + Actions
 #----------------------------------------------------------------------------------------------------------------------------------------------#
@@ -401,9 +405,9 @@ class Evaluator(Node):
     def send_next_goal(self):
 
         if self.current_run >= self.n_runs:
-
-            # Hier Visualisierung und Daten speichern
-
+            df = pd.DataFrame.from_dict(self.metrics,orient='index')
+            df.index.name = 'RUN_ID'
+            df.to_csv(self.folder_path+self.save_log_info, sep=';', index=True, index_label='RUN_ID')
             rclpy.shutdown()
             return
         
@@ -457,6 +461,13 @@ class Evaluator(Node):
 #----------------------------------------------------------------------------------------------------------------------------------------------#
 
     def result_callback(self, future):
+        self.metrics[self.current_run] = {
+                                    'success/collision': None,
+                                    'planned_path': None,
+                                    'traveled_path': None,
+                                    'time_taken': None,
+                                            }
+
         self.get_logger().info('result_callback aufgerufen')
         end_time = time.monotonic()
         duration = end_time - self.current_start_time if self.current_start_time else 0.0
@@ -469,11 +480,18 @@ class Evaluator(Node):
         if planned is None:
             self.get_logger().warn(f'No Planned Path for this Run -> Collision/Canceled')
             self.get_logger().warn(f'Current stats: success={self.success_counter}, 'f'failure={self.collission_counter}')
+            self.metrics[self.current_run]['success/collision'] = 'collision'
         else:
         # Beispiel-Effizienz: planned / traveled (1.0 ideal, <1 Umwege, >1 selten)
-            eff = planned / traveled if traveled > 1e-6 else float('inf')
+            eff_path = planned / traveled if traveled > 1e-6 else float('inf')
             eff_time = traveled / duration
-            self.get_logger().warn(f"Run {self.current_run}: planned={planned:.2f} m, traveled={traveled:.2f} m, time={duration:.2f} s, eff(planned/traveled)={eff:.3f}, eff(time)={eff_time}, time={duration:.2f} s")
+            self.get_logger().warn(f"Run {self.current_run}: planned={planned:.2f} m, traveled={traveled:.2f} m, time={duration:.2f} s, eff(planned/traveled)={eff_path:.3f}, eff(time)={eff_time}, time={duration:.2f} s")
+            self.metrics[self.current_run]['planned_path'] = planned
+            self.metrics[self.current_run]['traveled_path'] = traveled
+            self.metrics[self.current_run]['time_taken'] = duration
+            self.metrics[self.current_run]['success/collision'] = 'success'
+            self.metrics[self.current_run]['path_efficiency'] = eff_path
+            self.metrics[self.current_run]['time_effiency'] = eff_time
 
 
         if status == GoalStatus.STATUS_SUCCEEDED:
