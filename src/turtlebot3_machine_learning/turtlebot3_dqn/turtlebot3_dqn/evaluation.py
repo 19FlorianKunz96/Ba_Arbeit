@@ -43,6 +43,7 @@ from nav2_msgs.srv import LoadMap
 from nav2_msgs.srv import ClearEntireCostmap
 from nav2_msgs.srv import ManageLifecycleNodes
 from std_msgs.msg import Bool
+from nav_msgs.msg import Path
 #----------------------------------------------------------------------------------------------------------------------------------------------#
 #                                                          Standart Libraries
 #----------------------------------------------------------------------------------------------------------------------------------------------#
@@ -57,11 +58,14 @@ import rclpy.time
 class Evaluator(Node):
     def __init__(self):
         super().__init__('evaluator')
-        #self.declare_parameter('use_sim_time', True)
+        
+        self.classic_mode = False
 
 #----------------------------------------------------------------------------------------------------------------------------------------------#
 #                                                          Feedback + Visualisierung
 #----------------------------------------------------------------------------------------------------------------------------------------------#
+
+
     #Feedback
         self.feedback=None
         self.last_feedback_time = 0.0
@@ -73,6 +77,13 @@ class Evaluator(Node):
         self.current_start_time = None
 
         self.collision_detector = False
+
+        self.current_path_length = dict()     # Pfadlänge für aktuellen Run
+        self.plan_locked = False   # nach neuem Goal erst neuen Plan abwarten
+        self.goal_sent_stamp = None
+
+        self.traveled_dist = 0.0
+        self._last_odom_xy = None
 
     #Visualisierung
         plt.ion()
@@ -118,6 +129,8 @@ class Evaluator(Node):
         self.initial_pose_pub = self.create_publisher(PoseWithCovarianceStamped,'/initialpose',10)
         self.sub_scan = self.create_subscription(LaserScan, '/scan', self.on_scan, 1)
         self.collision_publisher = self.create_publisher(Bool,'/collision_stop',10)
+        self.plan_topic = '/plan' if self.classic_mode else '/rl/target_path'
+        self.sub_global_path = self.create_subscription(Path, self.plan_topic, self.on_global_path, 10)
 
     #Services
         self.respawn_client = self.create_client(SetEntityState, '/set_entity_state')
@@ -144,83 +157,60 @@ class Evaluator(Node):
 #----------------------------------------------------------------------------------------------------------------------------------------------#
 #                                                          Class - Functions
 #----------------------------------------------------------------------------------------------------------------------------------------------#
-    def on_scan(self, msg:LaserScan):
-        for distance in msg.ranges:
-            if distance < 0.15:
-                msg = Bool()
-                msg.data = True
-                self.collision_publisher.publish(msg)
-                self.collision_detector = True
-                self.collision_elimination()
-                break
-        
 
-    def init_amcl(self):
-        self.publish_initial_pose()
-        self.amcl_counter +=1
-        if self.amcl_counter > 2:
-            self.amcl_counter = 0
-            self.init_timer.destroy()
-            self.send_next_goal()
+#----------------------------------------------------------------------------------------------------------------------------------------------#
+#                                                                Logging
+#----------------------------------------------------------------------------------------------------------------------------------------------#
 
-    def collision_elimination(self):
-        self.get_logger().warn(f'Collision detected... Starting Respawn')
-        self.collission_counter+=1
-        self.get_logger().info(f'Status: success={self.success_counter}, 'f'failure={self.collission_counter}')
+########################################################## Distance ############################################################################
 
-        #1. Roboter in Gazebo respawnen
-        target_pose = self.respawn_robot()
-        #self.reset_simulation()
-        time.sleep(0.2)
+    def path_length(self, path_msg: Path) -> float:
+        poses = path_msg.poses
+        if len(poses) < 2:
+            return 0.0
+        length = 0.0
+        for i in range(1, len(poses)):
+            p1 = poses[i-1].pose.position
+            p2 = poses[i].pose.position
+            length += math.hypot(p2.x - p1.x, p2.y - p1.y)
+        return float(length)
 
-        # self.reload_map()
-        # time.sleep(0.2)
-
-        self.clear_global_costmap()
-        time.sleep(0.2)
-
-        self.clear_local_costmap()
-        time.sleep(0.2)
-
-        # self.reset_nav2()
-        # time.sleep(3)
-
-        # self.startup_nav2()
-        # time.sleep(3)
-
-        #2. AMCL Pose neu setzen mit neu gespawnter Roboterpose
-        self.relocalize_amcl(target_pose)
-        time.sleep(0.2)
-
-        #3. Goal neu setzen
-        self.send_next_goal()
-        self.collision_detector = False
-        self.get_logger().warn(f'Ready !!!')
-        msg = Bool()
-        msg.data = self.collision_detector
-        self.collision_publisher.publish(msg)
-
-    
-    def publish_initial_pose(self):
-        if self.init_act_pose is None:
-            self.get_logger().warn("init_pose is None. Waiting for Gazebo pose")
+    def on_global_path(self, msg: Path):
+        # Optional: nur akzeptieren, wenn wir gerade auf einen Plan warten
+        if self.plan_locked:
+            #self.get_logger().info("ignored: plan_locked=True")
             return
-        msg = PoseWithCovarianceStamped()
-        msg.header.frame_id = "map"
-        msg.header.stamp = rclpy.time.Time().to_msg()
+        
+        if not getattr(self,'wait_for_first_plan',False):
+            self.get_logger().info("ignored: wait_for_first plan")
+            return
+        
+        if len(msg.poses)<2:
+            return
 
-        msg.pose.pose.position.x, msg.pose.pose.position.y,msg.pose.pose.orientation.w,msg.pose.pose.orientation.x,msg.pose.pose.orientation.y,msg.pose.pose.orientation.z = self.init_act_pose
+        self.current_path_length[self.current_run]=self.path_length(msg)
+        self.plan_locked = True
+        self.wait_for_first_plan = False
 
-        # kleine, gültige Kovarianz
-        msg.pose.covariance[0] = 0.25
-        msg.pose.covariance[7] = 0.25
-        msg.pose.covariance[35] = 0.0685
-        self.initial_pose_pub.publish(msg)
-        time.sleep(1)
-        self.get_logger().info("Initial pose published!")
+        self.get_logger().info(f"Planned path length (Run {self.current_run}): {self.current_path_length[self.current_run]:.2f} m")
 
     def odom_callback(self,msg:Odometry):
-         self.init_act_pose = (msg.pose.pose.position.x,msg.pose.pose.position.y,msg.pose.pose.orientation.w,msg.pose.pose.orientation.x,msg.pose.pose.orientation.y,msg.pose.pose.orientation.z)
+        self.init_act_pose = (msg.pose.pose.position.x,msg.pose.pose.position.y,msg.pose.pose.orientation.w,msg.pose.pose.orientation.x,msg.pose.pose.orientation.y,msg.pose.pose.orientation.z)
+        x = msg.pose.pose.position.x
+        y = msg.pose.pose.position.y
+
+    # traveled distance integrieren (nur wenn ein Run aktiv ist)
+        if self.current_start_time is not None:
+            if self._last_odom_xy is not None:
+                lx, ly = self._last_odom_xy
+                self.traveled_dist += math.hypot(x - lx, y - ly)
+            self._last_odom_xy = (x, y)
+        else:
+            self._last_odom_xy = (x, y)
+
+#----------------------------------------------------------------------------------------------------------------------------------------------#
+#                                                   Nav2 Services            
+#----------------------------------------------------------------------------------------------------------------------------------------------#
 
     def reset_nav2(self):
         req = ManageLifecycleNodes.Request()
@@ -261,9 +251,94 @@ class Evaluator(Node):
         for i in range(2):
             self.publish_initial_pose()
             time.sleep(0.2)
-        future = self.reset_global_costmap_client.call_async(req)
+        future = self.reset_client.call_async(req)
         self.get_logger().info("Reset done...")   
         rclpy.spin_until_future_complete(self,future,timeout_sec=10.0)
+
+#----------------------------------------------------------------------------------------------------------------------------------------------#
+#                                                               
+#----------------------------------------------------------------------------------------------------------------------------------------------#
+    def on_scan(self, msg:LaserScan):
+        for distance in msg.ranges:
+            if distance < 0.15:
+                msg = Bool()
+                msg.data = True
+                self.collision_publisher.publish(msg)
+                self.collision_detector = True
+                self.collision_elimination()
+                break
+        
+
+    def init_amcl(self):
+        self.publish_initial_pose()
+        self.amcl_counter +=1
+        if self.amcl_counter > 2:
+            self.amcl_counter = 0
+            self.init_timer.destroy()
+            self.send_next_goal()
+
+    def collision_elimination(self):
+        self.get_logger().warn(f'Collision detected... Starting Respawn')
+        self.collission_counter+=1
+
+        #0. aktives Goal canceln
+        self.cancel_active_goal()
+        #1. Roboter in Gazebo respawnen
+        target_pose = self.respawn_robot()
+        #self.reset_simulation() #alternativ ganze simulation restetten. Dann respawnt der Roboter aber bei x=0.0, y=0.0
+        time.sleep(3) #Vorher 3 Sekunden TEST
+
+        # self.reload_map()
+        # time.sleep(0.2)
+
+        if self.classic_mode:
+            self.clear_global_costmap()
+            time.sleep(2)
+
+            self.clear_local_costmap()
+            time.sleep(2)
+
+        # self.reset_nav2()
+        # time.sleep(3)
+
+        # self.startup_nav2()
+        # time.sleep(3)
+
+        #2. AMCL Pose neu setzen mit neu gespawnter Roboterpose
+        self.relocalize_amcl(target_pose)
+        #self.relocalize_amcl(self.current_goal.pose)
+        time.sleep(2) #vorher 2 Sekunden TEST
+
+
+
+        #3. Goal neu setzen
+        self.send_next_goal()
+        self.get_logger().warn(f'Ready !!!')
+
+        self.collision_detector = False
+        msg = Bool()
+        msg.data = self.collision_detector
+        self.collision_publisher.publish(msg)
+
+    
+    def publish_initial_pose(self):
+        if self.init_act_pose is None:
+            self.get_logger().warn("init_pose is None. Waiting for Gazebo pose")
+            return
+        msg = PoseWithCovarianceStamped()
+        msg.header.frame_id = "map"
+        msg.header.stamp = rclpy.time.Time().to_msg()
+
+        msg.pose.pose.position.x, msg.pose.pose.position.y,msg.pose.pose.orientation.w,msg.pose.pose.orientation.x,msg.pose.pose.orientation.y,msg.pose.pose.orientation.z = self.init_act_pose
+
+        # kleine Kovarianz nötig. nur so groß dass sie als gültig angesehen wird
+        msg.pose.covariance[0] = 0.25
+        msg.pose.covariance[7] = 0.25
+        msg.pose.covariance[35] = 0.0685
+        self.initial_pose_pub.publish(msg)
+        time.sleep(1)
+        self.get_logger().info("Initial pose published!")
+
 
     def relocalize_amcl(self,pose):
         self.get_logger().info("Set AMCL...")
@@ -284,16 +359,13 @@ class Evaluator(Node):
     def respawn_robot(self):
         #neues Programm: hier soll in Zukunft immer das angefahrene Ziel bei einer Kollision zum neuen Startpunkt werden
         self.get_logger().info("Set Entity...")
-        self.current_run +=1
         state = EntityState()
         state.name='waffle_pi'
 
         target_pose = self.current_goal.pose
-
         state.pose = target_pose
         req = SetEntityState.Request()
         req.state = state
-
         future = self.respawn_client.call_async(req)
         rclpy.spin_until_future_complete(self,future,timeout_sec=1.0)
 
@@ -301,21 +373,17 @@ class Evaluator(Node):
             result = future.result()
         except Exception as e:
             self.get_logger().error(f"Respawn-Service fehlgeschlagen: {e}")
-
         else:
             self.get_logger().info("Respawn in Gazebo OK.")
 
-        
-
-
         return target_pose
+    
+#----------------------------------------------------------------------------------------------------------------------------------------------#
+#                                                            Goals   
+#----------------------------------------------------------------------------------------------------------------------------------------------#
 
     def create_goal(self) -> PoseStamped:
         x,y = self.goals[self.current_run % len(self.goals)]
-
-        yaw = random.uniform(-math.pi, math.pi)
-        qz = math.sin(yaw / 2.0)
-        qw = math.cos(yaw / 2.0)
 
         pose = PoseStamped()
         pose.header.frame_id = self.frame_id
@@ -324,19 +392,17 @@ class Evaluator(Node):
         pose.pose.position.x = x
         pose.pose.position.y = y
         pose.pose.position.z = 0.0
-        pose.pose.orientation.z = qz
-        pose.pose.orientation.w = qw
+
+        pose.pose.orientation.z = 0.0
+        pose.pose.orientation.w = 1.0
 
         return pose
 
     def send_next_goal(self):
 
         if self.current_run >= self.n_runs:
-            ##################################
-            ##################################
-            ##### Hier Logging + Save Data ###
-            ##################################
-            ##################################
+
+            # Hier Visualisierung und Daten speichern
 
             rclpy.shutdown()
             return
@@ -351,6 +417,13 @@ class Evaluator(Node):
         self.get_logger().info(f'neues Goal gesetzt')
         self.current_start_time = time.monotonic()
 
+        self.traveled_dist = 0.0
+        self._last_odom_xy = None
+        #self.current_path_length = None
+        self.plan_locked = False #vorher True
+        self.wait_for_first_plan = False
+
+
         send_goal_future = self._action_client.send_goal_async(msg,feedback_callback=self.feedback_callback)
         send_goal_future.add_done_callback(self.goal_response_callback)
 
@@ -359,21 +432,49 @@ class Evaluator(Node):
     def goal_response_callback(self,future):###
         goal_handle = future.result()
         if not goal_handle.accepted:
-            self.collission_counter += 1
-            self.send_next_goal()
+            # self.collission_counter += 1
+            # self.send_next_goal()
             return
+        
+        self.nav_goal_handle = goal_handle
+        self.plan_locked = False
+        self.wait_for_first_plan = True
 
         result_future = goal_handle.get_result_async()
         result_future.add_done_callback(self.result_callback)
+
+    def cancel_active_goal(self):
+        if self.nav_goal_handle is None:
+            return
+
+        self.get_logger().warn("Cancel actual Goal...")
+        cancel_future = self.nav_goal_handle.cancel_goal_async()
+        rclpy.spin_until_future_complete(self, cancel_future, timeout_sec=2.0)
+        self.nav_goal_handle = None
+#----------------------------------------------------------------------------------------------------------------------------------------------#
+#                                                               Result Callback
+#                                                     # hier wird auch Effizienz, etc. berechnet #
+#----------------------------------------------------------------------------------------------------------------------------------------------#
 
     def result_callback(self, future):
         self.get_logger().info('result_callback aufgerufen')
         end_time = time.monotonic()
         duration = end_time - self.current_start_time if self.current_start_time else 0.0
 
-        goal_result = future.result()
-        status = goal_result.status
-        result_msg = goal_result.result
+        status = future.result().status
+
+        #planned = self.current_path_length[self.current_run]
+        planned = self.current_path_length.get(self.current_run, None)
+        traveled = self.traveled_dist
+        if planned is None:
+            self.get_logger().warn(f'No Planned Path for this Run -> Collision/Canceled')
+            self.get_logger().warn(f'Current stats: success={self.success_counter}, 'f'failure={self.collission_counter}')
+        else:
+        # Beispiel-Effizienz: planned / traveled (1.0 ideal, <1 Umwege, >1 selten)
+            eff = planned / traveled if traveled > 1e-6 else float('inf')
+            eff_time = traveled / duration
+            self.get_logger().warn(f"Run {self.current_run}: planned={planned:.2f} m, traveled={traveled:.2f} m, time={duration:.2f} s, eff(planned/traveled)={eff:.3f}, eff(time)={eff_time}, time={duration:.2f} s")
+
 
         if status == GoalStatus.STATUS_SUCCEEDED:
             self.success_counter += 1
@@ -386,16 +487,9 @@ class Evaluator(Node):
             self.get_logger().info(f'Current stats: success={self.success_counter}, 'f'failure={self.collission_counter}')
             self.send_next_goal()
 
-        # else:
-        #     self.collission_counter += 1
-        #     self.get_logger().warn(f'Goal #{self.current_run} FAILED (nav2 result={result_msg}, 'f'action status={status}) after {duration:.2f} s.')
-        #     self.get_logger().info(f'Current stats: success={self.success_counter}, 'f'failure={self.collission_counter}')
-        #     self.respawn_robot()
-
 
     def feedback_callback(self, feedback_msg):
         self.feedback = feedback_msg.feedback
-        #self.get_logger().info(f'distance_remaining={feedback.distance_remaining:.2f}')
 
 
 

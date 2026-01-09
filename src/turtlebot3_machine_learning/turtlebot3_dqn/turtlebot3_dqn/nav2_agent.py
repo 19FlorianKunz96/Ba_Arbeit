@@ -151,6 +151,12 @@ class DQNadvisor(Node):
         self.collision_publishing = msg.data
         if self.collision_publishing:
             self.get_logger().warn(f'Stop... Collision...')
+
+            #zusätzliche Verriegelung, dass Ziele des alten Pfades angefahren werden, wenn Kollision passiert ist
+            self.global_path = []
+            self.local_goal = None
+            self.last_index = 0
+            self.done = True
         else:
             self.get_logger().warn(f'Moving... Collision fixed...')
 
@@ -234,6 +240,9 @@ class DQNadvisor(Node):
     def on_path(self, msg:Path):
         self.global_path = msg.poses
         self.last_index = 0
+        self.local_goal = None
+        self.done = True #???
+        self.last_path_stamp = msg.header.stamp
         self.get_logger().info(f'neuer globaler Pfad')
 
     def sub_target(self):
@@ -308,7 +317,14 @@ class DQNadvisor(Node):
         if self.collision_publishing:
             resp.ok = True
             resp.vx = 0.0; resp.vy = 0.0; resp.wz = 0.0
-            resp.msg = "collision_stop"
+            resp.msg = "collision stop"
+            resp.action_stamp = self.get_clock().now().to_msg()
+            return resp
+        
+        if not self.global_path:
+            resp.ok = True
+            resp.vx = 0.0; resp.vy = 0.0; resp.wz = 0.0
+            resp.msg = "no path"
             resp.action_stamp = self.get_clock().now().to_msg()
             return resp
 

@@ -104,7 +104,7 @@ void RLController::setPlan(const nav_msgs::msg::Path & path) {
     }
     path_odom.poses.push_back(pose);
   }
-
+  path_odom.header.stamp = node_->now(); // nur testweise, muss vll wieder raus bei Problemen
   global_path_pub->publish(path_odom);
 
 }
