@@ -11,8 +11,8 @@ def moving_average(data, window_size=100):
     return numpy.convolve(data, numpy.ones(window_size)/window_size, mode='same')
 
 
-path = Path('src/turtlebot3_machine_learning/turtlebot3_dqn/evaluation/PER_N2_D3QN/c8afb22e-058d-444b-8e3e-3a218ac2eed4_2025-11-03_stage4_rainbow/graph_data.csv')
-path2 = Path('src/turtlebot3_machine_learning/turtlebot3_dqn/evaluation/PER_N2_D3QN/c8afb22e-058d-444b-8e3e-3a218ac2eed4_2025-11-03_stage4_rainbow/loss_data.csv')
+path = Path('/home/verwalter/turtlebot3_ws/src/turtlebot3_machine_learning/turtlebot3_dqn/trainings_done/f3fa2021-8f56-4e07-92d1-623c857a326b_2026-01-14_stage4_rainbow/graph_data.csv')
+path2 = Path('/home/verwalter/turtlebot3_ws/src/turtlebot3_machine_learning/turtlebot3_dqn/trainings_done/f3fa2021-8f56-4e07-92d1-623c857a326b_2026-01-14_stage4_rainbow/loss_data.csv')
 data= pd.read_csv(path)
 data2=pd.read_csv(path2)
 

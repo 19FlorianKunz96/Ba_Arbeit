@@ -33,7 +33,7 @@ class RLEnvironment(Node):
         self.robot_pose_x = 0.0
         self.robot_pose_y = 0.0
 
-        self.action_size = 6
+        self.action_size = 5
         self.max_step = 800
         self.last_state = []
         self.current_state = []
@@ -301,10 +301,10 @@ class RLEnvironment(Node):
         return tuple(round(x / res) for x in state)
 
 
-    def calculate_reward(self):
+    def calculate_reward(self,action):
        
-        if self.discretize_state(self.last_state) == self.discretize_state(self.current_state):
-            state_reward = -1
+        if action == 5:
+            state_reward = -2
         else:
             state_reward = 0
 
@@ -312,14 +312,14 @@ class RLEnvironment(Node):
         obstacle_reward = self.compute_weighted_obstacle_reward()
         
 
-        print('directional_reward: %f, obstacle_reward: %f' % (yaw_reward, obstacle_reward))
+        print('directional_reward: %f, obstacle_reward: %f, state_reward: %f' % (yaw_reward, obstacle_reward,state_reward))
         reward = yaw_reward + obstacle_reward + state_reward
 
         if self.succeed:
-            reward = 1000.0
+            reward = 100.0
 
         elif self.fail:
-            reward = -500.0
+            reward = -50.0
 
         return reward
     
@@ -353,7 +353,7 @@ class RLEnvironment(Node):
 
         self.current_state = self.calculate_state()
         response.state = self.current_state
-        response.reward = self.calculate_reward()
+        response.reward = self.calculate_reward(action)
         self.last_state=deepcopy(self.current_state)
         response.done = self.done
         response.success = self.succeed

@@ -305,7 +305,11 @@ class RLEnvironment(Node):
             angle = -math.pi/4 + self.goal_angle + (math.pi/8 * i) + math.pi/2
             tr = 1 - 4 * abs(0.5 - math.modf(0.25 + 0.5 * (angle % (2 * math.pi)) / math.pi)[0])
             yaw_rewards.append(tr)
-        yaw_reward = yaw_rewards[action]
+        #Anpassung auf ActionSpace 6
+        if action < 5:
+            yaw_reward = yaw_rewards[action]
+        else:
+            yaw_reward = 0.0
 
         progress_rate = 2** (self.goal_distance/self.init_goal_distance)
 
@@ -314,7 +318,10 @@ class RLEnvironment(Node):
         else:
             obstacle_reward = 1.0
 
-        reward = ((round(yaw_reward * 5, 2)) * progress_rate) + obstacle_reward
+        if action == 5:
+            reward = -1.0
+        else:
+            reward = ((round(yaw_reward * 5, 2)) * progress_rate) + obstacle_reward
         #reward = (yaw_reward * progress_rate) + obstacle_reward
 
         if self.succeed:

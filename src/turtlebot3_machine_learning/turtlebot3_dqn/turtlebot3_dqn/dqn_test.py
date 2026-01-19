@@ -62,11 +62,11 @@ class DQNTest(Node):
         
         self.test_mode = True
         self.rainbowmode=False
-        self.distributional_mode=True
+        self.distributional_mode=False
 
         self.full_noisy_dense = True
 
-        self.state_size = 28
+        self.state_size = 26 #28 for new_environment, 26 for custon_environment
         self.num_quantiles=51
         #self.action_size = 5
 

@@ -59,11 +59,10 @@ from tensorflow.keras.optimizers import RMSprop
 class DQNadvisor(Node):
     def __init__(self):
         super().__init__('dqn_advisor')
-        self.folder_path= FSPath('/home/verwalter/turtlebot3_ws/src/turtlebot3_machine_learning/turtlebot3_dqn/evaluation/PER_N2_D3QN/c8afb22e-058d-444b-8e3e-3a218ac2eed4_2025-11-03_stage4_rainbow')
+        self.folder_path= FSPath('/home/verwalter/turtlebot3_ws/src/turtlebot3_machine_learning/turtlebot3_dqn/evaluation/AS5_RobotisReward_AlleKomponenten/f3fa2021-8f56-4e07-92d1-623c857a326b_2026-01-14_stage4_rainbow')
         self.episode = 'stage00004_episode04000.h5'
         self.model_path = os.path.join(self.folder_path,self.episode)
         self.declare_parameter('service_name','/agents/dqn/get_action')
-        self.declare_parameter('state_size',28)
         if not self.has_parameter('use_sim_time'):
             self.declare_parameter('use_sim_time', True)
 
@@ -74,6 +73,13 @@ class DQNadvisor(Node):
         self.distributional_mode=False
         self.full_noisy_dense = True
         self.num_quantiles=51
+        self.robotis = True
+
+        if self.robotis:
+            self.declare_parameter('state_size',26)
+        else:
+            self.declare_parameter('state_size',28)
+
 
         self.init_pose = None
 
@@ -276,14 +282,21 @@ class DQNadvisor(Node):
             self.done = False
 
     def build_state(self):
-        state = []
-        for n, var in enumerate(self.scan_ranges):
-            if n % 2 == 0:
+        if self.robotis:
+            state = []
+            state.append(float(self.goal_distance))
+            state.append(float(self.goal_angle))
+            for var in self.front_ranges:
                 state.append(float(var))
-        state.append(float(self.goal_angle))
-        state.append(float(self.goal_distance))
-        state.append(float(self.min_obstacle_distance))
-        state.append(float(self.min_obstacle_distance_index))
+        else:
+            state = []
+            for n, var in enumerate(self.scan_ranges):
+                if n % 2 == 0:
+                    state.append(float(var))
+            state.append(float(self.goal_angle))
+            state.append(float(self.goal_distance))
+            state.append(float(self.min_obstacle_distance))
+            state.append(float(self.min_obstacle_distance_index))
         return state
     
 

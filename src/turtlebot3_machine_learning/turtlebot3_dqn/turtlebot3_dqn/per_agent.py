@@ -71,6 +71,13 @@ class DQNAgent(Node):
 
     def __init__(self):
         super().__init__('dqn_agent')
+        CUSTOM_OBJECTS = {
+    "Dueling_DQN": Dueling_DQN,
+    "NoisyDense": NoisyDense,
+    "DuelingQRDQN": DuelingQRDQN,
+    "quantile_huber_loss": quantile_huber_loss,
+}
+
         #---------------------------------------------------------------------------------------------------------------------------------
         #                                                  Training Mode
         #---------------------------------------------------------------------------------------------------------------------------------
@@ -91,7 +98,7 @@ class DQNAgent(Node):
         #                                        Initial Parameters for the Agent
         #---------------------------------------------------------------------------------------------------------------------------------
         #Agent
-        self.state_size = 28
+        self.state_size = 26 #28 for new_environment, 26 for custon_environment
         self.action_size=self.get_parameter('action_space').get_parameter_value().integer_value
         #World
         self.stage = self.get_parameter('stagex').get_parameter_value().integer_value
@@ -112,18 +119,18 @@ class DQNAgent(Node):
         #---------------------------------------------------------------------------------------------------------------------------------
         #                                              Hyperparameters
         #---------------------------------------------------------------------------------------------------------------------------------
+        #Distributional
+        self.distributional_mode=False
+        self.num_quantiles = 51
+        self.taus = tensorflow.constant((numpy.arange(self.num_quantiles) + 0.5) / self.num_quantiles, dtype=tensorflow.float32)
+        self.learningrate_distributional = 1e-3
+        self.epsilon_distributional = 1e-8
         #Standart
         self.discount_factor = 0.99
         self.learning_rate = 0.001
         self.step_counter = 0
         self.batch_size = 64 if self.distributional_mode else 64
         self.gradient_clipping = True
-        #Distributional
-        self.distributional_mode=True
-        self.num_quantiles = 51
-        self.taus = tensorflow.constant((numpy.arange(self.num_quantiles) + 0.5) / self.num_quantiles, dtype=tensorflow.float32)
-        self.learningrate_distributional = 1e-3
-        self.epsilon_distributional = 1e-8
         #Target Update
         self.tau = 0.005
         self.use_soft_target = True
@@ -142,41 +149,6 @@ class DQNAgent(Node):
         self.fc2=256
         self.fc3=None
 
-        self.hyperparams = {
-            'Stage' : self.stage,
-            'Folder Name' : self.training_dir,
-            'Learned from older Stages' : self.stage_boost,
-            'Learned from Model' : {'Folder' : self.load_from_folder,'Stage':self.load_from_stage, 'Episode': self.load_from_episode},
-            'Success' : self.info,
-            'State Size' : self.state_size,
-            'Action Szie' : self.action_size,
-            'Dueling':True,
-            'Double DQN': True,
-            'Architecture' : [self.fc1,self.fc2,self.fc3],
-            'Maximum Episodes' : self.max_training_episodes,
-            'Discount Factor' : self.discount_factor,
-            'Learning Rate' : self.learning_rate if self.distributional_mode is False else self.learningrate_distributional,
-            'NSteps' : self.nsteps,
-            'Batch Size' : self.batch_size,
-            'Replay Memory Min' : self.min_replay_memory_size,
-            'Distributional Mode' : self.distributional_mode,
-            'Distributional Epsilon' : self.epsilon_distributional,
-            'Number Quantiles' : self.num_quantiles,
-            'Soft Target': self.use_soft_target,
-            'Tau for Softupdate' : self.tau,
-            'Full Noisy': self.full_noisy_dense,
-            'Mixing One Step':self.mix_one_step,
-            'Mixing Ratio' : self.mixing_ratio,
-            'PER': True,
-            'Eps PER':self.eps_per,
-            'Alpha':self.alpha,
-            'MaxBufferSize':self.max_buffer_size,
-            'Beta Start': self.beta_start,
-            'Beta Frames': self.beta_frames,
-            'Gradient Clipping': self.gradient_clipping
-
-
-            }
         #---------------------------------------------------------------------------------------------------------------------------------
         #                                                        Create Buffers
         #---------------------------------------------------------------------------------------------------------------------------------
@@ -218,6 +190,42 @@ class DQNAgent(Node):
         self.training_path_comp = os.path.join(self.training_dir_path,self.training_dir)
         self.model_path = os.path.join(self.model_dir_path,'stage' + str(self.stage) + '_episode' + str(self.load_episode) + '.h5')
 
+        self.hyperparams = {
+            'Stage' : self.stage,
+            'Folder Name' : self.training_dir,
+            'Learned from older Stages' : self.stage_boost,
+            'Learned from Model' : {'Folder' : self.load_from_folder,'Stage':self.load_from_stage, 'Episode': self.load_from_episode},
+            'Success' : self.info,
+            'State Size' : self.state_size,
+            'Action Szie' : self.action_size,
+            'Dueling':True,
+            'Double DQN': True,
+            'Architecture' : [self.fc1,self.fc2,self.fc3],
+            'Maximum Episodes' : self.max_training_episodes,
+            'Discount Factor' : self.discount_factor,
+            'Learning Rate' : self.learning_rate if self.distributional_mode is False else self.learningrate_distributional,
+            'NSteps' : self.nsteps,
+            'Batch Size' : self.batch_size,
+            'Replay Memory Min' : self.min_replay_memory_size,
+            'Distributional Mode' : self.distributional_mode,
+            'Distributional Epsilon' : self.epsilon_distributional,
+            'Number Quantiles' : self.num_quantiles,
+            'Soft Target': self.use_soft_target,
+            'Tau for Softupdate' : self.tau,
+            'Full Noisy': self.full_noisy_dense,
+            'Mixing One Step':self.mix_one_step,
+            'Mixing Ratio' : self.mixing_ratio,
+            'PER': True,
+            'Eps PER':self.eps_per,
+            'Alpha':self.alpha,
+            'MaxBufferSize':self.max_buffer_size,
+            'Beta Start': self.beta_start,
+            'Beta Frames': self.beta_frames,
+            'Gradient Clipping': self.gradient_clipping
+
+
+            }
+
         #---------------------------------------------------------------------------------------------------------------------------------
         #                                                           Stage Boost Settings
         #   Parameters have to be set in Launch File
@@ -245,7 +253,9 @@ class DQNAgent(Node):
                                                os.path.join(self.load_from_folder,
                                                 f'stage{self.load_from_stage:05d}_episode{self.load_from_episode:05d}.h5'))
                 if os.path.exists(self.file_root) == True:
-                    self.model.set_weights(load_model(self.file_root).get_weights())
+                    #loaded = load_model(self.file_root,custom_objects=CUSTOM_OBJECTS,compile=False)
+                    #self.model.set_weights(load_model(loaded.get_weights()))
+                    self.model.load_weights(self.file_root)
                     self.epsilon = 0.65
                     self.update_target_model()
                     self.info.append('Weights successfully loaded, target model updated')
