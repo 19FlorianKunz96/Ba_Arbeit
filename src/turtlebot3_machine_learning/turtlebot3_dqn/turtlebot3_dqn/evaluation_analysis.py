@@ -2,11 +2,11 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-df_w1=pd.read_csv('/home/verwalter/turtlebot3_ws/src/turtlebot3_machine_learning/turtlebot3_dqn/Evaluation_RL_Klassisch_Log/Stage1_Agent1_.csv',sep=';')
-df_w2=pd.read_csv('/home/verwalter/turtlebot3_ws/src/turtlebot3_machine_learning/turtlebot3_dqn/Evaluation_RL_Klassisch_Log/Stage2_Agent1.csv',sep=';')
-df_w3=pd.read_csv('/home/verwalter/turtlebot3_ws/src/turtlebot3_machine_learning/turtlebot3_dqn/Evaluation_RL_Klassisch_Log/Stage3_Agent1.csv',sep=';')
-df_w4=pd.read_csv('/home/verwalter/turtlebot3_ws/src/turtlebot3_machine_learning/turtlebot3_dqn/Evaluation_RL_Klassisch_Log/Stage4_Agent1.csv',sep=';')
-df_w5=pd.read_csv('/home/verwalter/turtlebot3_ws/src/turtlebot3_machine_learning/turtlebot3_dqn/Evaluation_RL_Klassisch_Log/Stage5_Agent1.csv',sep=';')
+df_w1=pd.read_csv('/home/verwalter/turtlebot3_ws/src/turtlebot3_machine_learning/turtlebot3_dqn/Evaluation_RL_Klassisch_Log/Stage1_AS5_RewardPaper_AlleKomponenten.csv',sep=';')
+df_w2=pd.read_csv('/home/verwalter/turtlebot3_ws/src/turtlebot3_machine_learning/turtlebot3_dqn/Evaluation_RL_Klassisch_Log/Stage2_AS5_RewardPaper_AlleKomponenten.csv',sep=';')
+#df_w3=pd.read_csv('/home/verwalter/turtlebot3_ws/src/turtlebot3_machine_learning/turtlebot3_dqn/Evaluation_RL_Klassisch_Log/Stage3_Agent1.csv',sep=';')
+#df_w4=pd.read_csv('/home/verwalter/turtlebot3_ws/src/turtlebot3_machine_learning/turtlebot3_dqn/Evaluation_RL_Klassisch_Log/Stage4_Agent1.csv',sep=';')
+#df_w5=pd.read_csv('/home/verwalter/turtlebot3_ws/src/turtlebot3_machine_learning/turtlebot3_dqn/Evaluation_RL_Klassisch_Log/Stage5_Agent1.csv',sep=';')
 print(len(df_w1))
 
 
@@ -21,11 +21,13 @@ def analyze_metrics(data:pd.DataFrame):
     
 a,b,c,d = analyze_metrics(df_w1)
 print(f'sucess:{a}, collision:{b}, SPL:{c}, SCT:{d}')
+a,b,c,d = analyze_metrics(df_w2)
+print(f'sucess:{a}, collision:{b}, SPL:{c}, SCT:{d}')
 
 print(df_w1['success/collision'].value_counts())
 
-def plot_data(w1,w2,w3,w4,w5):
-    list = [w1,w2,w3,w4,w5]
+def plot_data(w1,w2):#,w2,w3,w4,w5):
+    list = [w1,w2]#,w2,w3,w4,w5]
     df_all = pd.DataFrame()
     for id,df in enumerate(list,1):
         df_all[f'Welt {id}'] = df['success/collision'].value_counts()
@@ -33,7 +35,7 @@ def plot_data(w1,w2,w3,w4,w5):
     
 
     
-plot_df = plot_data(df_w1,df_w2,df_w3,df_w4,df_w5)
+plot_df = plot_data(df_w1,df_w2)#,df_w2,df_w3,df_w4,df_w5)
 plot_df2 = plot_df.copy()
 plot_df2.index.name = "Ergebnis"          # <- Name für den Index setzen
 plot_df_long = (plot_df2.reset_index().melt(id_vars="Ergebnis", var_name="Welt", value_name="Anzahl"))

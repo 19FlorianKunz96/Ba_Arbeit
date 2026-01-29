@@ -60,7 +60,7 @@ class Evaluator(Node):
     def __init__(self):
         super().__init__('evaluator')
         
-        self.classic_mode = False
+        self.classic_mode = True
         self.metrics = dict()
 
 #----------------------------------------------------------------------------------------------------------------------------------------------#
@@ -72,7 +72,7 @@ class Evaluator(Node):
         self.feedback=None
         self.last_feedback_time = 0.0
 
-        self.n_runs = 20
+        self.n_runs = 100
         self.current_run= 1
         self.success_counter = 0
         self.collission_counter = 0
@@ -91,6 +91,8 @@ class Evaluator(Node):
         self.shutting_down = False
         self.active_run_id=None
 
+        self.canceled_run_ids = set()
+
     #Visualisierung
         plt.ion()
         self.fig,self.ax = plt.subplots()
@@ -99,7 +101,7 @@ class Evaluator(Node):
 #                                                          Trajektorienplanung
 #----------------------------------------------------------------------------------------------------------------------------------------------#
 
-        self.stage = 4
+        self.stage = 5
 
         if self.stage == 5:
             self.goals = [(1.0,1.0),(3.9,-3.15),(-3.0,-2.0),(-6.0,-2.6),(-2.4,3.2),(6.0,3.0),(6.5,-3.5),(0.8,3.0),(-0.5,-1.4)]
@@ -125,7 +127,7 @@ class Evaluator(Node):
         self.init_act_pose = (0.0,0.0,1.0,0.0,0.0,0.0)
 
         self.folder_path = '/home/verwalter/turtlebot3_ws/src/turtlebot3_machine_learning/turtlebot3_dqn/Evaluation_RL_Klassisch_Log'
-        self.save_log_info = f'/Stage{self.stage}_Agent2.csv' #Auch action space , welcher agent, klassisch, ... angeben
+        self.save_log_info = f'/Stage{self.stage}_klassischerPlaner.csv' #Auch action space , welcher agent, klassisch, ... angeben
 #----------------------------------------------------------------------------------------------------------------------------------------------#
 #                                                          Services + Topics + Actions
 #----------------------------------------------------------------------------------------------------------------------------------------------#
@@ -282,10 +284,10 @@ class Evaluator(Node):
 
         if self.classic_mode:
             self.clear_global_costmap()
-            time.sleep(2)
+            #time.sleep(2)
 
             self.clear_local_costmap()
-            time.sleep(2)
+            #time.sleep(2)
 
         # self.reset_nav2()
         # time.sleep(3)
@@ -384,13 +386,13 @@ class Evaluator(Node):
         if self.shutting_down:
             return False
 
-        if self.current_run > self.n_runs:   # > statt >= (weil current_run “next id” ist)
+        if self.finished_runs > self.n_runs:   # > statt >= (weil current_run “next id” ist). vorher basierend auf current_run
             return False
         
         goal = self.create_goal()
         self.current_goal = goal
         run_id = self.current_run
-        self.current_run +=1
+        #self.current_run +=1
 
         msg = NavigateToPose.Goal()
         msg.pose = goal
@@ -419,6 +421,7 @@ class Evaluator(Node):
             # self.send_next_goal()
             self.metrics[run_id] = {"success/collision": "rejected"}
             self.finished_runs +=1
+            self.current_run += 1
             self.maybe_finish()
             return
         
@@ -427,6 +430,7 @@ class Evaluator(Node):
         self.wait_for_first_plan = True
 
         self.active_run_id = run_id
+        self.current_run += 1
 
         #fragt nach, wann das Ziel fertig ist.
         result_future = goal_handle.get_result_async()
@@ -437,6 +441,9 @@ class Evaluator(Node):
     def cancel_active_goal(self):
         if self.nav_goal_handle is None:
             return
+        
+        if self.active_run_id is not None:
+            self.canceled_run_ids.add(self.active_run_id)
 
         self.get_logger().warn("Cancel actual Goal...")
         cancel_future = self.nav_goal_handle.cancel_goal_async()
@@ -451,6 +458,10 @@ class Evaluator(Node):
 
     def result_callback(self, future, run_id):
         self.get_logger().info('result_callback aufgerufen')
+        if run_id != self.active_run_id:
+            if run_id in self.metrics and self.metrics[run_id].get('success/collision') is not None:
+                self.get_logger().info(f"Ignore result for non-active run {run_id} (active={self.active_run_id})")
+                return
 
         #Metriken initialisieren
         if run_id not in self.metrics:
@@ -462,15 +473,29 @@ class Evaluator(Node):
         planned = self.current_path_length.get(run_id, None)
         traveled = self.traveled_dist
 
+        if status == GoalStatus.STATUS_CANCELED and run_id in self.canceled_run_ids:
+            self.get_logger().info(f"Ignore canceled result we triggered (run {run_id})")
+            self.metrics.setdefault(run_id, {})
+            self.metrics[run_id]['success/collision'] = 'collision'
+            self.metrics[run_id].setdefault('planned_path', planned)
+            self.metrics[run_id].setdefault('traveled_path', traveled)
+            self.metrics[run_id].setdefault('time_taken', duration)
+            self.get_logger().warn(f"{run_id} ist als collission geloggt worden")
+            self.canceled_run_ids.discard(run_id)
+            self.finished_runs +=1
+            self.maybe_finish()
+            return
+
         if self.is_resetting and status != GoalStatus.STATUS_SUCCEEDED:
             self.get_logger().info(f"Ignore canceled result during reset (run {run_id})")
 
             #Metriken auch loggen wenn Goal nicht erreicht
             self.metrics.setdefault(run_id, {})
-            self.metrics[run_id].setdefault('success/collision', 'collision')
+            self.metrics[run_id]['success/collision'] = 'collision'
             self.metrics[run_id].setdefault('planned_path', planned)
             self.metrics[run_id].setdefault('traveled_path', traveled)
             self.metrics[run_id].setdefault('time_taken', duration)
+            self.get_logger().warn(f"{run_id} ist als collission geloggt worden")
             #finished runs inkrementieren und schauen ob max erreicht
             self.finished_runs += 1
             self.maybe_finish()
@@ -490,6 +515,7 @@ class Evaluator(Node):
             self.metrics[run_id]['planned_path'] = planned
             self.metrics[run_id]['traveled_path'] = traveled
             self.metrics[run_id]['time_taken'] = duration
+            self.get_logger().warn(f"{run_id} ist als success geloggt worden")
             self.success_counter += 1
 
             #inkrementieren und schauen ob max erreicht
@@ -502,10 +528,15 @@ class Evaluator(Node):
         # canceled/aborted/unknown oder kein Plan -> als collision/fail loggen
         #TODO evtl entfernen weil überflüssig
         self.metrics[run_id]['success/collision'] = 'collision'
+        self.get_logger().warn(f"{run_id} ist als collission geloggt worden")
         self.collission_counter += 1
 
         self.finished_runs += 1
         self.maybe_finish()
+
+        #das ist neu:
+        if not self.shutting_down and not self.is_resetting:
+            self.send_next_goal()
 
 
 

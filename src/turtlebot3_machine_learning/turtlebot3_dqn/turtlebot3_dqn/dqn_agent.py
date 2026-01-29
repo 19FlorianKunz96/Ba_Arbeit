@@ -192,6 +192,8 @@ class DQNAgent(Node):
                 else:
                     self.info.append('File doesnt exist. No weights loaded')
                     self.get_logger().warn('File doesnt exist. No weights loaded')
+                    
+    #Beschreibungen zum Speichern im Config-File
 
         self.hyperparams = {
             'Stage' : self.stage,
