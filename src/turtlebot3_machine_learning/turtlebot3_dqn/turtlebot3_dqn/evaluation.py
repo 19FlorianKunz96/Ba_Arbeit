@@ -60,7 +60,7 @@ class Evaluator(Node):
     def __init__(self):
         super().__init__('evaluator')
         
-        self.classic_mode = True
+        self.classic_mode = False
         self.metrics = dict()
 
 #----------------------------------------------------------------------------------------------------------------------------------------------#
@@ -127,7 +127,7 @@ class Evaluator(Node):
         self.init_act_pose = (0.0,0.0,1.0,0.0,0.0,0.0)
 
         self.folder_path = '/home/verwalter/turtlebot3_ws/src/turtlebot3_machine_learning/turtlebot3_dqn/Evaluation_RL_Klassisch_Log'
-        self.save_log_info = f'/Stage{self.stage}_klassischerPlaner.csv' #Auch action space , welcher agent, klassisch, ... angeben
+        self.save_log_info = f'/Stage{self.stage}_AS5_RewardRobotis_AlleKomponenten.csv' #Auch action space , welcher agent, klassisch, ... angeben
 #----------------------------------------------------------------------------------------------------------------------------------------------#
 #                                                          Services + Topics + Actions
 #----------------------------------------------------------------------------------------------------------------------------------------------#
