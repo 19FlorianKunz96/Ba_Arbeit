@@ -1,0 +1,8 @@
+{
+  "bag_dir": "/home/verwalter/rosbags/Stage4_AS5_RewardRobotis_AlleKomponenten_20260213_144126",
+  "n_runs_detected": 15,
+  "success_counter_from_run_end": 8,
+  "collision_counter_from_run_end_not_succeeded": 7,
+  "n_collision_events": 7,
+  "valid_runs_success_and_no_collision": 8
+}

@@ -26,6 +26,7 @@ from gazebo_msgs.msg import ModelStates
 from turtlebot3_msgs.srv import Dqn
 from rclpy.executors import MultiThreadedExecutor
 from std_msgs.msg import Bool
+from rclpy.qos import qos_profile_sensor_data
 #----------------------------------------------------------------------------------------------------------------------------------------------#
 #                                                       init Quality of Service for AMCL
 #----------------------------------------------------------------------------------------------------------------------------------------------#
@@ -74,6 +75,7 @@ class DQNadvisor(Node):
         self.full_noisy_dense = True
         self.num_quantiles=51
         self.robotis = True
+        self.real_mode = True
 
         if self.robotis:
             self.declare_parameter('state_size',26)
@@ -86,7 +88,7 @@ class DQNadvisor(Node):
         self.state_size = self.get_parameter('state_size').get_parameter_value().integer_value
         self.obs = np.zeros((1, self.state_size), dtype = np.float32)
 
-        self.sub_scan = self.create_subscription(LaserScan, '/scan', self.on_scan, 10)
+        self.sub_scan = self.create_subscription(LaserScan, '/scan', self.on_scan, qos_profile_sensor_data)
         self.sub_odom = self.create_subscription(Odometry, '/odom', self.on_odom, 10)
         self.sub_path = self.create_subscription(Path, '/rl/target_path', self.on_path, 1)
         self.sub_collsion = self.create_subscription(Bool, '/collision_stop', self.on_collision_stop, 1)
@@ -172,6 +174,8 @@ class DQNadvisor(Node):
         self.scan_angles = []
         self.front_ranges = []
         self.front_angles = []
+        self.real_front_ranges=[]
+        self.real_front_angles=[]
 
         num_of_lidar_rays = len(msg.ranges)
         angle_min = msg.angle_min
@@ -179,28 +183,49 @@ class DQNadvisor(Node):
 
         self.front_distance = msg.ranges[0]
 
-        for i in range(num_of_lidar_rays):
-            angle = angle_min + i * angle_increment
-            distance = msg.ranges[i]
+        if self.real_mode:
+            for i in range(num_of_lidar_rays):
+                angle=angle_min+i*angle_increment
+                distance = msg.ranges[i]
+                self.scan_ranges.append(distance)
+                self.scan_angles.append(angle)
 
-            if distance == float('Inf'):
-                distance = 3.5
-            elif np.isnan(distance):
-                distance = 0.0
+            for i in range(24):
+                if i<12:
+                    target_angle = 0 + i*math.pi/24
+                else:
+                    target_angle = 3*math.pi/2 + (i-12)*math.pi/24
+                for index, angle in enumerate(self.scan_angles):
+                    if angle >= target_angle and not np.isnan(self.scan_ranges[index]) and not np.isinf(self.scan_ranges[index]):
+                        self.front_angles.append(angle)
+                        self.front_ranges.append(self.scan_ranges[index])
+                        break
+            if len(self.front_ranges)<24:
+                self.front_ranges.append(self.scan_ranges[-1])
+                self.front_angles.append(self.scan_angles[-1])
 
-            self.scan_ranges.append(distance)
-            self.scan_angles.append(angle)
-            
+        else:
+            for i in range(num_of_lidar_rays):
+                angle = angle_min + i * angle_increment
+                distance = msg.ranges[i]
 
-            if (0 <= angle <= math.pi/2) or (3*math.pi/2 <= angle <= 2*math.pi):
-                self.front_ranges.append(distance)
-                self.front_angles.append(angle)
+                if distance == float('Inf'):
+                    distance = 3.5
+                elif np.isnan(distance):
+                    distance = 0.0
 
-        self.min_obstacle_distance_index = int(np.argmin(self.scan_ranges))
-        self.min_obstacle_angle = self.scan_angles[self.min_obstacle_distance_index]
-        self.min_obstacle_distance = self.scan_ranges[self.min_obstacle_distance_index]
-        
-        self.front_min_obstacle_distance = min(self.front_ranges) if self.front_ranges else 10.0
+                self.scan_ranges.append(distance)
+                self.scan_angles.append(angle)
+                
+
+                if (0 <= angle <= math.pi/2) or (3*math.pi/2 <= angle <= 2*math.pi):
+                    self.front_ranges.append(distance)
+                    self.front_angles.append(angle)
+
+            self.min_obstacle_distance_index = int(np.argmin(self.scan_ranges))
+            self.min_obstacle_angle = self.scan_angles[self.min_obstacle_distance_index]
+            self.min_obstacle_distance = self.scan_ranges[self.min_obstacle_distance_index]
+            self.front_min_obstacle_distance = min(self.front_ranges) if self.front_ranges else 10.0
 
     def on_odom(self, msg: Odometry):
         self.init_act_pose = (msg.pose.pose.position.x,msg.pose.pose.position.y,msg.pose.pose.orientation.w,msg.pose.pose.orientation.x,msg.pose.pose.orientation.y,msg.pose.pose.orientation.z)
@@ -282,22 +307,46 @@ class DQNadvisor(Node):
             self.done = False
 
     def build_state(self):
-        if self.robotis:
-            state = []
-            state.append(float(self.goal_distance))
-            state.append(float(self.goal_angle))
-            for var in self.front_ranges:
-                state.append(float(var))
-        else:
-            state = []
-            for n, var in enumerate(self.scan_ranges):
-                if n % 2 == 0:
+
+        if self.real_mode:
+            if self.robotis:
+                state = []
+                state.append(float(self.goal_distance))
+                state.append(float(self.goal_angle))
+                # for i in range(24):
+                #     state.append(float(self.front_ranges[i]))
+                for var in self.front_ranges:
                     state.append(float(var))
-            state.append(float(self.goal_angle))
-            state.append(float(self.goal_distance))
-            state.append(float(self.min_obstacle_distance))
-            state.append(float(self.min_obstacle_distance_index))
-        return state
+            else:
+                state = []
+                for n, var in enumerate(self.scan_ranges):
+                    if n % 2 == 0:
+                        state.append(float(var))
+                state.append(float(self.goal_angle))
+                state.append(float(self.goal_distance))
+                state.append(float(self.min_obstacle_distance))
+                state.append(float(self.min_obstacle_distance_index))
+            return state
+        
+        else:
+            if self.robotis:
+                state = []
+                state.append(float(self.goal_distance))
+                state.append(float(self.goal_angle))
+                # for i in range(24):
+                #     state.append(float(self.front_ranges[i]))
+                for var in self.front_ranges:
+                    state.append(float(var))
+            else:
+                state = []
+                for n, var in enumerate(self.scan_ranges):
+                    if n % 2 == 0:
+                        state.append(float(var))
+                state.append(float(self.goal_angle))
+                state.append(float(self.goal_distance))
+                state.append(float(self.min_obstacle_distance))
+                state.append(float(self.min_obstacle_distance_index))
+            return state
     
 
     

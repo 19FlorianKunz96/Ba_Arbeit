@@ -47,6 +47,7 @@ setup(
             'lidar_subscriber = turtlebot3_dqn.Lidar_Subscriber:main',
             'odom_subscriber = turtlebot3_dqn.Odom_Subscriber:main',
             'evaluation = turtlebot3_dqn.evaluation:main',
+            'eval_rosbag = turtlebot3_dqn.eval_rosbag:main',
 
         ],
     },
