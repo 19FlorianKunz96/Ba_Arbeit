@@ -60,8 +60,8 @@ from tensorflow.keras.optimizers import RMSprop
 class DQNadvisor(Node):
     def __init__(self):
         super().__init__('dqn_advisor')
-        self.folder_path= FSPath('/home/verwalter/turtlebot3_ws/src/turtlebot3_machine_learning/turtlebot3_dqn/evaluation/NAV2_TEST/AS5_RobotisReward_AlleKomponenten/f3fa2021-8f56-4e07-92d1-623c857a326b_2026-01-14_stage4_rainbow')
-        self.episode = 'stage00004_episode04000.h5'
+        self.folder_path= FSPath('/home/verwalter/turtlebot3_ws/src/turtlebot3_machine_learning/turtlebot3_dqn/evaluation/NAV2_TEST/Vortraining_AS5_RobotisReward_AlleKomponenten/713a3626-b2e5-4ad3-9a4b-7bcf09bf5cfd_2026-01-19_stage4_rainbow')
+        self.episode = 'stage00004_episode02100.h5'
         self.model_path = os.path.join(self.folder_path,self.episode)
         self.declare_parameter('service_name','/agents/dqn/get_action')
         if not self.has_parameter('use_sim_time'):
@@ -75,7 +75,7 @@ class DQNadvisor(Node):
         self.full_noisy_dense = True
         self.num_quantiles=51
         self.robotis = True
-        self.real_mode = True
+        self.real_mode = False
 
         if self.robotis:
             self.declare_parameter('state_size',26)

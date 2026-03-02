@@ -71,7 +71,7 @@ class Evaluator(Node):
 #                                                          Zielplanung
 #----------------------------------------------------------------------------------------------------------------------------------------------#
 
-        self.stage = 4
+        self.stage = 1
 
         if self.stage == 5:
             self.goals = [(1.0,1.0),(3.9,-3.15),(-3.0,-2.0),(-6.0,-2.6),(-2.4,3.2),(6.0,3.0),(6.5,-3.5),(0.8,3.0),(-0.5,-1.4)]
@@ -97,7 +97,7 @@ class Evaluator(Node):
         self.init_act_pose = (0.0,0.0,1.0,0.0,0.0,0.0)
 
         self.folder_path = '/home/verwalter/turtlebot3_ws/src/turtlebot3_machine_learning/turtlebot3_dqn/Evaluation_RL_Klassisch_Log'
-        self.save_log_info = f'/Stage{self.stage}_AS5_RewardRobotis_AlleKomponenten' #Auch action space , welcher agent, klassisch, ... angeben
+        self.save_log_info = f'/Stage{self.stage}_AS5_RewardRobotis_AlleKomponenten_Vortrainiert' #Auch action space , welcher agent, klassisch, ... angeben
 #----------------------------------------------------------------------------------------------------------------------------------------------#
 #                                                          Services + Topics + Actions
 #----------------------------------------------------------------------------------------------------------------------------------------------#
