@@ -1,18 +1,10 @@
-# Reinforcement Learning for TurtleBot3
+# RL-Learning for TurtleBot3
 
-This project implements and evaluates several **Deep Q-Network (DQN) extensions** for autonomous navigation using **TurtleBot3** in **ROS2** and **Gazebo**.  
-The trained agent can also be integrated as a **local planner within Nav2**.
+## Training (DQN Extensions) with Launchfile
 
----
+### 1. Set environment variable
 
-# Requirements
-
-- ROS2 (Humble recommended)
-- Gazebo
-- TurtleBot3 packages
-- Python machine learning dependencies (depending on your implementation)
-
-Make sure the TurtleBot3 environment variable is set before running the simulation:
+Set the TurtleBot3 model in the bash environment:
 
 ```bash
 export TURTLEBOT3_MODEL=waffle_pi
@@ -20,31 +12,41 @@ export TURTLEBOT3_MODEL=waffle_pi
 
 If another robot model is used, adjust the value accordingly.
 
-If this variable is not set correctly, Gazebo may fail to load the robot and the node may hang.
+If this variable is not set correctly, the Gazebo node may hang and the world may not load properly in future runs.
 
 ---
 
-# Training the Agent
+### 2. Select training environment
 
-Training is started using a ROS2 launch file.
+The environment can be exchanged by selecting another environment node in the launch file.
 
-## Start Training
+Available environments:
+
+- `custom_environment.py`  
+  Environment used by the baseline agent.
+
+- `new_environment.py`  
+  Environment used in the paper.
+
+If `new_environment.py` is used, the parameter **state_size** has to be adjusted in the agent.
+
+---
+
+### 3. Start training
+
+Run the launch file in the terminal:
 
 ```bash
 ros2 launch turtlebot3_gazebo training_complete.launch.py
 ```
 
----
-
-## Training Parameters
-
-The following parameters can be set when starting the training:
+Available parameters:
 
 | Parameter | Description | Default |
 |----------|-------------|--------|
-| stagex | Defines the training stage (which Gazebo world is used) | 1 |
-| max_episodes | Number of training episodes | 100 |
-| action_space | Size of the action space | 5 |
+| `stagex` | Training stage (defines which world is used) | 1 |
+| `max_episodes` | Number of training episodes | 100 |
+| `action_space` | Size of the action space | 5 |
 
 Example:
 
@@ -54,32 +56,16 @@ ros2 launch turtlebot3_gazebo training_complete.launch.py stagex:=4 max_episodes
 
 ---
 
-## Training Environments
+### 4. Training with pretrained weights (stage boost)
 
-Different environments can be selected in the launch file.
-
-Available environments:
-
-**custom_environment.py**  
-Baseline environment used for the initial agent.
-
-**new_environment.py**  
-Environment described in the research paper.
-
-If `new_environment.py` is used, the parameter **state_size must be adjusted in the agent**.
-
----
-
-## Training with Pretrained Weights (Stage Boost)
-
-Training can continue using weights from a previous training stage.
+The agent can also be trained using weights from a previous training.
 
 | Parameter | Description | Default |
 |----------|-------------|--------|
-| stage_boost | Enables loading pretrained weights | False |
-| load_from_folder | Folder containing the pretrained model | actual |
-| load_from_stage | Stage from which the model was trained | 1 |
-| load_from_episode | Episode used to load weights | 100 |
+| `stage_boost` | Enables loading pretrained weights | False |
+| `load_from_folder` | Folder containing the pretrained model | actual |
+| `load_from_stage` | Stage of the pretrained model | 1 |
+| `load_from_episode` | Episode used to load weights | 100 |
 
 Example:
 
@@ -88,25 +74,25 @@ ros2 launch turtlebot3_gazebo training_complete.launch.py \
 stagex:=4 \
 max_episodes:=4000 \
 stage_boost:=True \
-load_from_folder:=<path_to_pretrained_model> \
+load_from_folder:=<path_to_pretrained_model_folder> \
 load_from_stage:=<stage_number> \
 load_from_episode:=<episode_number>
 ```
 
-Make sure the pretrained model uses **the same architecture**.
+Make sure the pretrained model uses the same architecture.
 
 ---
 
-## Training Outputs
+### 5. Training outputs
 
-During training the following data is saved **every 50 episodes**:
+During training the following data is saved every **50 episodes**:
 
 - model weights
 - epsilon values
 - training configuration
-- training graphs
+- graphs
 
-Results are stored in the following directory:
+Results are stored in:
 
 ```
 trainings_done/{uuid}_{date}_{stage}
@@ -118,46 +104,44 @@ inside the machine learning package.
 
 # Testing the Agent
 
-The trained agent can be evaluated using a dedicated test launch file.
+### 1. Configure environment
 
-## Configure Model Parameters
+As in the training process, the environment can be exchanged.
 
-Before testing, ensure the following parameters match the trained model:
+### 2. Adjust model parameters
 
-- state_size
-- action_size
+The following parameters must be set manually in the test agent:
 
-These parameters must be set manually in the **test agent**.
+- `state_size`
+- `action_size`
+
+These values must match the trained model.
 
 ---
 
-## Run the Test
+### 3. Run the test
 
 ```bash
 ros2 launch turtlebot3_gazebo agent_test.launch.py \
 stagex:=<testing_stage> \
-max_episodes:=<number_of_test_episodes> \
+max_episodes:=<testing_episodes> \
 load_from_folder:=<model_folder> \
 load_from_stage:=<training_stage> \
 load_from_episode:=<trained_episode> \
 action_space:=<action_space>
 ```
 
-Default number of testing episodes: **100**.
+Default number of test episodes: **100**
 
 ---
 
 # Using the Agent in Nav2
 
-The reinforcement learning agent can also be used as a **local planner in Navigation2**.
+### 1. Local planner configuration
 
----
+Currently the RL agent is included as the **default local planner**.
 
-## Local Planner Configuration
-
-Currently, the RL agent is integrated as the **default local planner**.
-
-If you want to use the classic **DWB local planner**, start Nav2 with the following parameter file:
+If the classic DWB planner should be used, the following parameter file must be set when starting Nav2:
 
 ```
 /home/verwalter/turtlebot3_ws/src/turtlebot3/turtlebot3_navigation2/param/humble/waffle_pi_classic.yaml
@@ -165,7 +149,9 @@ If you want to use the classic **DWB local planner**, start Nav2 with the follow
 
 ---
 
-## Start the Simulation
+### 2. Start simulation
+
+Start the simulation world:
 
 ```bash
 ros2 launch turtlebot3_gazebo turtlebot3_dqn_stage<number>.launch.py
@@ -173,130 +159,148 @@ ros2 launch turtlebot3_gazebo turtlebot3_dqn_stage<number>.launch.py
 
 ---
 
-## Start Navigation2
+### 3. Start Nav2
 
 ```bash
 ros2 launch turtlebot3_navigation2 navigation2.launch.py \
 use_sim_time:=True \
 map:=<path_to_map> \
-params_file:=<path_to_parameter_file_if_classic_mode_is_used>
+params_file:=<parameter_file_if_classic_planner_is_used>
 ```
 
 ---
 
-## Start the RL Agent
+### 4. Start the agent
 
 ```bash
 ros2 run turtlebot3_dqn nav2_agent
 ```
 
-If a **real TurtleBot3** is used, set the following parameter in `nav2_agent.py`:
+If a real TurtleBot is used, set
 
 ```
 real_mode = true
 ```
 
----
-
-# Automated Evaluation with Nav2
-
-Automated testing can be performed using the evaluation node.
-
-## Start Simulation and Navigation
-
-Start the same components as described in **Using the Agent in Nav2**.
+in `nav2_agent.py`.
 
 ---
 
-## Start Evaluation Node
+# Automated Tests with Nav2
+
+1. Start the same components as in **Using the Agent in Nav2**.
+
+2. Start the evaluation node:
 
 ```bash
 ros2 run turtlebot3_dqn evaluation
 ```
 
-This node performs automated evaluation of the agent's performance.
+# Agent Parametrization
+
+Some training parameters are not set in the launch file, but directly inside the agent and utility classes.
+
+### Environment-related parameters
+
+These parameters have to match the selected environment:
+
+| Parameter | Description |
+|----------|-------------|
+| `state_size` | Size of the state vector. Must match the selected environment. |
+| `action_space` / `action_size` | Number of available actions. Must match both the environment and the trained model. |
+
+Example:
+- `custom_environment.py` uses `state_size = 26`
+- `new_environment.py` uses `state_size = 28`
 
 ---
 
-# Project Structure (Example)
+### General training parameters
 
-```
-turtlebot3_dqn/
-│
-├── environments/
-│   ├── custom_environment.py
-│   └── new_environment.py
-│
-├── agents/
-│   ├── training_agent.py
-│   └── test_agent.py
-│
-├── launch/
-│   ├── training_complete.launch.py
-│   └── agent_test.launch.py
-│
-├── nav2_agent.py
-├── evaluation.py
-│
-└── trainings_done/
-```
+The following parameters are currently set directly in the agent:
+
+| Parameter | Default | Description |
+|----------|---------|-------------|
+| `discount_factor` | `0.99` | Discount factor for future rewards |
+| `learning_rate` | `0.001` | Learning rate for the optimizer |
+| `batch_size` | `64` | Batch size used for replay sampling |
+| `min_replay_memory_size` | `5000` | Minimum number of samples before training starts |
+| `max_buffer_size` | `500000` | Maximum replay buffer size |
+| `gradient_clipping` | `True` | Enables gradient clipping during training |
 
 ---
 
-# Notes
+### Target network parameters
 
-- Ensure that **action_space and state_size match the trained model**.
-- Pretrained models must use **the same network architecture**.
-- Gazebo may hang if the `TURTLEBOT3_MODEL` environment variable is not set.
+| Parameter | Default | Description |
+|----------|---------|-------------|
+| `use_soft_target` | `True` | Enables soft target updates |
+| `tau` | `0.005` | Update factor for the soft target update |
 
-# RL-Learning for Turtlebot3
+If soft target updates are disabled, the target network is updated manually after a defined number of steps.
 
-## Training(all extensions of the DQN) with Launchfile
-1. set environtment variable "TURTLEBOT3_MODEL:=wallfe_pi" in bash file (if other robots are used, adjust the value) to load the robot in gazebo, otherwise the node will hang and the world will not load correctly in future
-2. The environment can be exchanged by selecting another environment node in the launchfile. custom_environment.py is the environment from the baseline agent.
-   new_environment.py is the environment from paper. The parameter state_size has to be adjusted in the agent
-3. starting launchfile in x-terminal-emulator with 'ros2 launch turtlebot3_gazebo training_complete.launch.py
-   - here you can set some parameters:
-     - with stagex:= you can set the training stage, in wich world the robot will learn. Default value is 1 and it is requiered to plug in an integer value
-     - with max_episodes:= you can set the number of episodes, the robot will learn. Default value is 100 and its requiered to plug in an integer value
-     - with action_space:= you can set the expanded actionspace(default:5)-> if this is set to 6, the parameter action_space has to be adjusted in the environment
-     - example prompt:
-         ```console
-         $ ros2 launch turtlebot3_gazebo training_complete.launch.py stagex:=4 max_episodes:=4000
-     - with stage_boost:= the robot will not learn with zero weights, but will load weights from an older stage. Epsilon will be set to 0.2. Default value is False and its required to plug in an Boolean value
-     - with load_from_folder:= (just rational if stage_boost is set to True) you can plug in the basename of an path from an older training(folder 'trainings_done'), to load the weights. Default value is 'actual', so it will load theyoungest weights of the folder 'saved_model'
-     - with load_from_stage:= you can set the stage(normally the stage from the foldername).Default value is 1 and its required to plug in an integer value.
-     - with load_from_episode:= you can adjust the episode for loading weights(just rational if load_from_folder is not 'actual').Default value is 100 and its required to plug in an integer value.
-     - if stageboost: Make sure, the the pretrained model is from the same architecture
-         ```console
-         $ ros2 launch turtlebot3_gazebo training_complete.launch.py stagex:=4 max_episodes:=4000 stage_boost:=True load_from_folder<path to pretrained model folder> load_from_stage:=<the stage the predtrained model was trained> load_from_episode:=<epsisode the training should start>
-4. after training the weights(every 50 episodes), the epsilons, a config file from the training and the graphs are stored in the machine learning package in a folder 'trainings_done/{uuid}_{date}_{stage}'
+---
 
-## Test the agent
-1. As in the training the environment can be exchanged
-2. the state_size and the action_size has to be manually set in the testagent
-   ```console
-   $ ros2 launch turtlebot3_gazebo agent_test.launch.py stagex:=<testing stage> max_episodes:=<number of testig episodes(default:100)> load_from_folder<path to pretrained model folder> load_from_stage:=<the stage the predtrained model was trained> load_from_episode:=<epsisode of the trained model for testing> action_space:=<action space of the trained model(default:5)>
+### N-step learning parameters
+
+| Parameter | Default | Description |
+|----------|---------|-------------|
+| `nsteps` | `5` | Number of steps used for n-step return calculation |
+| `mix_one_step` | `True` | Mixes additional one-step samples into replay |
+| `mixing_ratio` | `0.2` | Probability of adding a one-step transition |
+
+---
+
+### Prioritized Experience Replay (PER)
+
+| Parameter | Default | Description |
+|----------|---------|-------------|
+| `alpha` | `0.6` | Controls how strongly priorities affect sampling |
+| `beta_start` | `0.4` | Initial value for importance-sampling correction |
+| `beta_frames` | `300000` | Number of frames over which beta increases |
+| `eps_per` | `1e-2` | Small value added to priorities for numerical stability |
+
+PER is used to sample more important transitions more often during training.
+
+---
+
+### Network architecture parameters
+
+| Parameter | Default | Description |
+|----------|---------|-------------|
+| `fc1` | `256` | Number of units in the first hidden layer |
+| `fc2` | `256` | Number of units in the second hidden layer |
+| `fc3` | `None` | Optional third hidden layer |
+| `full_noisy_dense` | `True` | Enables NoisyDense layers in the feature network |
+
+The current architecture uses a dueling network structure.
+
+---
+
+### Noisy Nets parameters
+
+Exploration is currently handled with **Noisy Networks**, so no epsilon-greedy strategy is used.
+
+| Parameter | Default | Description |
+|----------|---------|-------------|
+| `full_noisy_dense` | `True` | Replaces standard dense layers with `NoisyDense` layers |
+| `sigma0` | `0.5` | Initial noise scale in `NoisyDense` |
+
+If `training=True`, noise is sampled in the NoisyDense layers.  
+If `training=False`, only the deterministic weights are used.
+
+---
 
 
-## Use the agent in Nav2
-1. The agent is included as standard local planner at the moment. If the classic local planner DWB should be used, the parameterfile /home/verwalter/turtlebot3_ws/src/turtlebot3/turtlebot3_navigation2/param/humble/waffle_pi_classic.yaml
- has to be set in the prompt when starting Nav2
-2. Start the Simulation or the Bringup for real Turtlebot. If the real turtlebot is used, the parameter real_mode has to be set to true in nav2_agent.py
-   ```console
-   $ ros2 launch turtlebot3_gazebo turtlebot3_dqn_stage<number of the world to be loaded>.launch.py
-3. Start Nav2 with the correct map
-   ```console
-   $ ros2 launch turtlebot3_navigation2 navigation2.launch.py use_sim_time:=True map:=<path to map> params_file:=<path to parameter file if classic mode is used>
-3. Start the Agent
-   ```console
-   $ ros2 run turtlebot3_dqn nav2_agent
 
-## Automated Tests with Nav2
+### Current training setup
 
-1. 
-2. Start the same files as in "Use the agent in Nav2"
-3. Start the Evaluation Node
-   ```console
-   $ ros2 run turtlebot3_dqn evaluation
+The current agent configuration includes:
+
+- Dueling DQN
+- Double DQN target computation
+- Prioritized Experience Replay (PER)
+- N-step learning
+- Noisy Networks
+- Soft target updates
 
