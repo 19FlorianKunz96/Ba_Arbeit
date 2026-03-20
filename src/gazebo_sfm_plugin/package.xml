@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>gazebo_sfm_plugin</name>
+  <version>1.0.0</version>
+  <description>The gazebo_sfm_plugin package</description>
+
+  <maintainer email="noeperez@upo.es">Noé Pérez-Higueras</maintainer>
+  <author>Noé Pérez</author>
+
+  <license>BSD</license>
+  <url type="repository">https://github.com/robotics-upo/gazebo_sfm_plugin</url>
+
+  <!-- Buildsystem: ament/cmake für colcon -->
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <!-- Abhängigkeiten: reines Gazebo-Plugin + Social Force Model -->
+  <depend>gazebo</depend>
+  <depend>lightsfm</depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
