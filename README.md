@@ -12,6 +12,14 @@ If needed, copy trained weight folder into directory tree folder
 <your_workspace>/src/turtlebot3_machine_learning/turtlebot3_dqn/trainings_done
 ```
 
+Setup in Bash
+```bash
+if [ -f "$HOME/turtlebot3_ws/install/turtlebot3_gazebo/share/turtlebot3_gazebo/ament_environment_hooks/50_turtlebot3_gazebo.sh" ]; then
+    . "$HOME/turtlebot3_ws/install/turtlebot3_gazebo/share/turtlebot3_gazebo/ament_environment_hooks/50_turtlebot3_gazebo.sh"
+fi
+```
+
+
 ## Training (DQN Extensions) with Launchfile
 
 ### 0. Create Training Output Directory
