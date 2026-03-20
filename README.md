@@ -2,6 +2,16 @@
 
 ## Training (DQN Extensions) with Launchfile
 
+### 0. Create Training Output Directory
+
+Before starting the training process, ensure that the required output directory exists inside your workspace. The agent stores trained models and results in a subfolder called `trainings_done`.
+
+Create it using:
+
+```bash
+mkdir -p <your_workspace>/src/turtlebot3_machine_learning/turtlebot3_dqn/trainings_done
+```
+
 ### 1. Set environment variable
 
 Set the TurtleBot3 model in the bash environment:
