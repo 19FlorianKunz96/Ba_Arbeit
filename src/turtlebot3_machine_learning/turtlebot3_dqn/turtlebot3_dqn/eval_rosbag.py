@@ -61,7 +61,7 @@ class Evaluator(Node):
         self.feedback=None
         self.last_feedback_time = 0.0
 
-        self.n_runs = 15
+        self.n_runs = 100
         self.current_run= 1
         self.success_counter = 0
         self.collission_counter = 0
@@ -71,7 +71,7 @@ class Evaluator(Node):
 #                                                          Zielplanung
 #----------------------------------------------------------------------------------------------------------------------------------------------#
 
-        self.stage = 1
+        self.stage = 4
 
         if self.stage == 5:
             self.goals = [(1.0,1.0),(3.9,-3.15),(-3.0,-2.0),(-6.0,-2.6),(-2.4,3.2),(6.0,3.0),(6.5,-3.5),(0.8,3.0),(-0.5,-1.4)]

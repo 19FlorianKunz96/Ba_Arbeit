@@ -66,7 +66,7 @@ class DQNTest(Node):
 
         self.full_noisy_dense = True
 
-        self.state_size = 26 #28 for new_environment, 26 for custon_environment
+        self.state_size = 28 #28 for new_environment, 26 for custon_environment
         self.num_quantiles=51
         #self.action_size = 5
 
