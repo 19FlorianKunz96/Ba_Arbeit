@@ -1,5 +1,17 @@
 # RL-Learning for TurtleBot3
 
+## Setup
+
+Install requirements
+```bash
+python3 -m pip install --user "numpy==1.26.4" "tensorflow==2.15.1" pyqtgraph PyQt5 catkin_pkg empy lark packaging
+```
+
+If needed, copy trained weight folder into directory tree folder
+```bash
+<your_workspace>/src/turtlebot3_machine_learning/turtlebot3_dqn/trainings_done
+```
+
 ## Training (DQN Extensions) with Launchfile
 
 ### 0. Create Training Output Directory
